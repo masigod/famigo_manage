@@ -1,0 +1,10 @@
+[
+  {"chat_id": "oc_1", "name": "일일업무", "last_human_at": "2026-09-23T19:02:00+09:00"},
+  {"chat_id": "oc_2", "name": "진행중 - 가상 캠페인 A", "last_human_at": "2026-09-22T10:00:00+09:00"},
+  {"chat_id": "oc_3", "name": "준비중 - 가상 캠페인 B", "last_human_at": "2026-07-01T10:00:00+09:00"},
+  {"chat_id": "oc_4", "name": "종료 - 가상 캠페인 C", "last_human_at": "2026-08-01T10:00:00+09:00"},
+  {"chat_id": "oc_5", "name": "Cancel - 가상 캠페인 D"},
+  {"chat_id": "oc_6", "name": "완료(정산중_9/9) 가상 캠페인 E", "last_human_at": "2026-09-10T10:00:00+09:00"},
+  {"chat_id": "oc_7", "name": "알림 봇", "last_human_at": "2026-09-27T06:00:00+09:00"},
+  {"chat_id": "oc_8", "name": "외부 협업방", "external": true}
+]

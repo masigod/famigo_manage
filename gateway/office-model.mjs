@@ -1,0 +1,115 @@
+// office.json(빌더 산출물) → DeskRPG 가 읽는 Hermes 플러그인 모양.
+// 판단은 하지 않는다 — 빌더가 정한 상태·경과일을 카드 모양으로 옮길 뿐이다.
+
+import { readFileSync, statSync } from "node:fs";
+
+export const KANBAN_TASK_STATUSES = [
+  "triage",
+  "todo",
+  "scheduled",
+  "ready",
+  "running",
+  "blocked",
+  "review",
+  "done",
+  "archived",
+];
+
+const DAY = 86400;
+
+/** 파일 mtime 이 바뀌면 다시 읽는다. 브리핑이 office.json 을 새로 쓰면 재시작 없이 반영된다. */
+export function createOfficeSource(path) {
+  let cached = null;
+  let mtime = -1;
+  return function load() {
+    const m = statSync(path).mtimeMs;
+    if (m !== mtime) {
+      const office = JSON.parse(readFileSync(path, "utf8"));
+      if (office.schema !== 1) throw new Error(`office.json schema ${office.schema} 미지원`);
+      cached = office;
+      mtime = m;
+    }
+    return cached;
+  };
+}
+
+function epochOf(office) {
+  const t = Date.parse(office.generated_at);
+  return Number.isFinite(t) ? Math.floor(t / 1000) : Math.floor(Date.now() / 1000);
+}
+
+function daysLabel(days) {
+  return days === null || days === undefined ? "미확인" : `${days}일`;
+}
+
+export function ledgerCard(item, office) {
+  const now = epochOf(office);
+  const age = item.age_days;
+  const lines = [
+    `Lark 장부 ${item.id} · 종류 ${item.kind ?? "미기록"} · 원천 상태 ${item.source_status}`,
+    `경과 ${daysLabel(age)}${item.stale ? " — 7일 넘게 안 움직였다" : ""}`,
+    item.room ? `방: ${item.room}` : null,
+    item.assignee ? null : "담당: Lark 장부에 담당자 기록 없음",
+  ].filter(Boolean);
+  return {
+    id: item.id,
+    title: `${item.id} · ${item.title}${age !== null && age !== undefined ? ` (${age}일)` : ""}`,
+    body: lines.join("\n"),
+    status: item.status,
+    ...(item.assignee ? { assignee: item.assignee } : {}),
+    priority: item.stale ? "high" : "normal",
+    ...(item.kind ? { tenant: item.kind } : {}),
+    ...(age !== null && age !== undefined ? { created_at: now - age * DAY } : {}),
+    comment_count: 0,
+    ...(item.stale ? { warnings: { count: 1, highest_severity: "warning" } } : {}),
+  };
+}
+
+export function pipelineCard(item, office) {
+  const quiet = item.quiet_days;
+  const lines = [
+    `방 이름 접두사: ${item.stage}${item.stage_note ? ` (${item.stage_note})` : ""}`,
+    `마지막 사람 발화 이후 ${daysLabel(quiet)}`,
+    item.zombie ? "⚠ 좀비 후보 — 진행중·준비중인데 21일 이상 조용. 막힌 것인지 죽은 것인지 판정 필요" : null,
+    item.external ? "외부 방 — 이름·주제까지만" : null,
+  ].filter(Boolean);
+  return {
+    id: `C-${item.id}`,
+    title: `${item.zombie ? "🔴 " : ""}${item.title} · ${daysLabel(quiet)} 조용`,
+    body: lines.join("\n"),
+    status: item.status,
+    ...(item.assignee ? { assignee: item.assignee } : {}),
+    priority: item.zombie ? "high" : "normal",
+    tenant: item.stage,
+    comment_count: 0,
+    ...(item.zombie ? { warnings: { count: 1, highest_severity: "warning" } } : {}),
+  };
+}
+
+export function cardsFor(view, office) {
+  if (view === "ledger") return office.boards.ledger.map((i) => ledgerCard(i, office));
+  if (view === "pipeline") return office.boards.pipeline.map((i) => pipelineCard(i, office));
+  return [];
+}
+
+export function renderBoard(view, office, includeArchived) {
+  const columns = KANBAN_TASK_STATUSES.filter((s) => includeArchived || s !== "archived").map(
+    (name) => ({ name, tasks: [] }),
+  );
+  const tenants = new Set();
+  const assignees = new Set();
+  for (const card of cardsFor(view, office)) {
+    const column = columns.find((c) => c.name === card.status);
+    if (!column) continue;
+    column.tasks.push(card);
+    if (card.tenant) tenants.add(card.tenant);
+    if (card.assignee) assignees.add(card.assignee);
+  }
+  return {
+    columns,
+    tenants: [...tenants],
+    assignees: [...assignees],
+    latest_event_id: null,
+    now: epochOf(office),
+  };
+}

@@ -1,0 +1,10 @@
+# 실데이터·산출물·구성원 설정은 로컬 전용이다 (이 저장소는 public).
+out/
+config/office.config.json
+*.env
+.env*
+
+node_modules/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,7 @@
+{"id": "T001", "title": "가상 리워드 금액 확정", "kind": "decision", "status": "open", "opened": "2026-08-29", "room": "진행중 - 가상 캠페인 A", "owner": "Alpha"}
+{"id": "T002", "title": "가상 방 접두사 정리", "kind": "hygiene", "status": "open", "opened": "2026-09-25"}
+{"id": "T003", "title": "가상 로그인 전환", "kind": "work", "status": "open", "opened": "2026-09-10", "owner": "Bravo Lee"}
+{"id": "T002", "status": "resolved"}
+{"id": "T004", "title": "가상 외부 회신 대기", "kind": "blocked", "status": "blocked", "opened": "2026-09-20"}
+{"id": "T005", "title": "가상 판정 오류", "kind": "signal", "status": "closed_wrong", "opened": "2026-09-01"}
+{"id": "T006", "title": "봇 방 항목", "status": "open", "room": "알림 봇"}

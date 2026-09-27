@@ -1,0 +1,17 @@
+{
+  "name": "famigo-office",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Lark 브리핑 데이터를 DeskRPG 3D 가상 사무실로 — 구성원은 직원, To-do 장부와 캠페인 파이프라인은 칸반",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "bash scripts/office.sh build",
+    "doctor": "bash scripts/office.sh doctor",
+    "gateway": "bash scripts/office.sh gateway",
+    "seed": "bash scripts/office.sh seed",
+    "test": "python3 -m unittest discover -s tests && node --test tests/*.test.mjs"
+  }
+}

@@ -1,0 +1,16 @@
+{
+  "org_name": "아울러스 · Famigo",
+  "environment": "trading",
+  "include_syn": true,
+  "syn_look": "office-jun",
+  "exclude": [],
+  "members": {
+    "<people.json 의 L1 이름>": {
+      "look": "office-seo",
+      "role": "직무를 덮어쓸 때만",
+      "team": "팀을 덮어쓸 때만",
+      "aliases": ["장부 owner 칸에 쓰이는 다른 표기"],
+      "include": true
+    }
+  }
+}

@@ -1,0 +1,7 @@
+{
+  "p_alpha": {"L1": {"name": "Alpha Kim", "role": "운영 매니저", "team": "실무팀", "aliases": ["Alpha"]},
+              "L2": {"pattern": "SHOULD-NEVER-APPEAR-L2"}, "L3": {"temperament": "SHOULD-NEVER-APPEAR-L3"}},
+  "p_bravo": {"L1": {"name": "Bravo Lee", "role": "개발", "team": "개발"}},
+  "p_charlie": {"L1": {"name": "찰리", "role": "콘텐츠", "team": "마케팅"}},
+  "p_delta": {"L1": {"name": "Delta Park", "role": "리서치", "team": "실무팀", "active": false}}
+}

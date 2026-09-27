@@ -1,0 +1,2 @@
+{"date": "2026-09-26", "rooms_swept": 8, "rooms_failed": 0, "human_messages": 0, "dm_count": 0, "rooms": ["should", "not", "copy"]}
+{"date": "2026-09-27", "rooms_swept": 8, "rooms_failed": 0, "human_messages": 3, "dm_count": 0, "status": "ok", "Raw Text": "SHOULD-NEVER-APPEAR"}
