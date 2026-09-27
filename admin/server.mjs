@@ -11,6 +11,7 @@ import { spawn } from "node:child_process";
 import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { timingSafeEqual } from "node:crypto";
+import { networkInterfaces } from "node:os";
 import { OFFICE_LOOKS } from "../seed/looks.mjs";
 import { renderAdminPage } from "./page.mjs";
 
@@ -103,7 +104,36 @@ export function adminState({ roster, office, config, seedState }) {
   };
 }
 
-export function createAdmin({ root, password, runSync }) {
+/** 이 Mac 의 LAN 주소들 (IPv4, 내부망만). */
+export function lanAddresses() {
+  return Object.values(networkInterfaces())
+    .flat()
+    .filter((i) => i && i.family === "IPv4" && !i.internal)
+    .map((i) => i.address);
+}
+
+/** 팀원 접속 안내 — LAN 주소로 사무실이 실제로 열려 있는지 짧게 찔러 본다. */
+async function teamAccess(seedState, channelPassword, deskPort = 3000) {
+  const ip = lanAddresses()[0] ?? null;
+  let lan = false;
+  if (ip) {
+    try {
+      const r = await fetch(`http://${ip}:${deskPort}/auth`, { signal: AbortSignal.timeout(1200), redirect: "manual" });
+      lan = r.status < 500;
+    } catch {
+      lan = false;
+    }
+  }
+  return {
+    lan,
+    ip,
+    office_url: ip ? `http://${ip}:${deskPort}` : null,
+    invite_url: ip && seedState?.invite_code ? `http://${ip}:${deskPort}/channels/join/${seedState.invite_code}` : null,
+    channel_password: channelPassword || null,
+  };
+}
+
+export function createAdmin({ root, password, runSync, channelPassword = process.env.FAMIGO_CHANNEL_PASSWORD }) {
   if (!password || password.length < 8) throw new Error("관리자 비밀번호(FAMIGO_DESK_PASSWORD 8자+)가 필요하다");
   const paths = {
     config: join(root, "config", "office.config.json"),
@@ -159,12 +189,14 @@ export function createAdmin({ root, password, runSync }) {
       const url = new URL(req.url ?? "/", "http://admin.local");
       if (req.method === "GET" && url.pathname === "/") return send(res, 200, renderAdminPage(), "text/html; charset=utf-8");
       if (req.method === "GET" && url.pathname === "/api/state") {
+        const seedState = readJson(paths.seedState, null);
         return send(res, 200, {
+          access: await teamAccess(seedState, channelPassword),
           ...adminState({
             roster: readJson(paths.roster, null),
             office: readJson(paths.office, null),
             config: readJson(paths.config, {}),
-            seedState: readJson(paths.seedState, null),
+            seedState,
           }),
           sync: { running: sync.running, pending: sync.pending, lastExit: sync.lastExit, lastAt: sync.lastAt, log: sync.log },
         });

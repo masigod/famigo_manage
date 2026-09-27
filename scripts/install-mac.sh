@@ -28,6 +28,45 @@ unload_all() {
   for l in "${LABELS[@]}"; do
     launchctl bootout "gui/$UID_N/$l" 2>/dev/null || true
   done
+  # bootout 은 비동기다. 이전 프로세스가 다 내려가기 전에 bootstrap 하면
+  # "Bootstrap failed: 5: Input/output error" 가 난다 (2026-09-28 실측) — 사라질 때까지 기다린다.
+  for l in "${LABELS[@]}"; do
+    for _ in $(seq 1 30); do
+      launchctl print "gui/$UID_N/$l" >/dev/null 2>&1 || break
+      sleep 0.5
+    done
+  done
+}
+
+load_one() {
+  local l="$1"
+  for attempt in 1 2 3; do
+    launchctl bootstrap "gui/$UID_N" "$AGENTS/$l.plist" 2>/dev/null && return 0
+    sleep $((attempt * 2))
+  done
+  launchctl bootstrap "gui/$UID_N" "$AGENTS/$l.plist"   # 마지막 시도는 오류를 보여 준다
+}
+
+access() {
+  # shellcheck disable=SC1090
+  [[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
+  local host ip code lan
+  host=$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:HOSTNAME" "$AGENTS/life.famigo.office.deskrpg.plist" 2>/dev/null || echo "?")
+  ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
+  code=$(python3 -c "import json;print(json.load(open('$ROOT/out/seed_state.json')).get('invite_code') or '')" 2>/dev/null || true)
+  echo "── 접속"
+  echo "  나(관리자·사무실 소유자)"
+  echo "    사무실   http://localhost:3000    로그인 famigo-office / FAMIGO_DESK_PASSWORD"
+  echo "    관리자   http://127.0.0.1:3101    admin / FAMIGO_DESK_PASSWORD   (이 Mac 에서만)"
+  if [[ "$host" == "0.0.0.0" ]]; then
+    echo "  팀원 (같은 네트워크)"
+    echo "    1) http://${ip:-<이 Mac IP>}:3000 에서 각자 가입"
+    echo "    2) 초대 링크 http://${ip:-<이 Mac IP>}:3000/channels/join/${code:-<sync 후 생성>}"
+    echo "    3) 채널 비밀번호 FAMIGO_CHANNEL_PASSWORD 입력  (소유자 비밀번호와 다르다 — 이것만 알려 준다)"
+  else
+    echo "  팀원: 지금은 이 Mac 에서만 열려 있다. 팀에 열려면  bash scripts/install-mac.sh --lan"
+  fi
+  echo "  비밀번호 보기:  grep -E 'DESK|CHANNEL' $ENV_FILE"
 }
 
 status() {
@@ -44,11 +83,20 @@ status() {
   code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/ || true)
   [[ "$code" == "401" ]] && ok "관리자 웹 응답 (http://127.0.0.1:3101)" || echo "✗ 관리자 웹 무응답 ($code)"
   [[ -f "$ROOT/out/office.json" ]] && echo "  office.json 기준: $(python3 -c "import json;print(json.load(open('$ROOT/out/office.json'))['generated_at'])")"
+  echo "── 실행 중인 프로세스 (Famigo Office 것만)"
+  pgrep -fl "[d]eskrpg|[g]ateway/server.mjs|[o]ffice.sh sync" | sed 's/^/  /' || echo "  없음"
+  echo "── 열린 포트"
+  for port in 3000 8642 3101; do
+    line=$(lsof -nP -iTCP:$port -sTCP:LISTEN 2>/dev/null | awk 'NR==2 {print $1" pid "$2" "$9}')
+    echo "  $port: ${line:-닫힘}"
+  done
   echo "  로그: $LOGS"
+  access
 }
 
 case "${1:-}" in
   --status) status; exit 0 ;;
+  --access) access; exit 0 ;;
   --uninstall)
     unload_all
     for l in "${LABELS[@]}"; do rm -f "$AGENTS/$l.plist"; done
@@ -83,6 +131,8 @@ if [[ ! -f "$ENV_FILE" ]]; then
   ok "비밀값 생성: $ENV_FILE"
 fi
 grep -q '^DESKRPG_JWT_SECRET=' "$ENV_FILE" || ( umask 077; echo "DESKRPG_JWT_SECRET=$(openssl rand -hex 32)" >> "$ENV_FILE" )
+# 팀원에게 알려 주는 건 채널 비밀번호뿐이다 — 소유자·관리자 비밀번호와 분리한다.
+grep -q '^FAMIGO_CHANNEL_PASSWORD=' "$ENV_FILE" || ( umask 077; echo "FAMIGO_CHANNEL_PASSWORD=$(openssl rand -hex 6)" >> "$ENV_FILE" )
 # shellcheck disable=SC1090
 set -a; source "$ENV_FILE"; set +a
 
@@ -133,7 +183,7 @@ write_plist life.famigo.office.deskrpg \
 
 write_plist life.famigo.office.gateway \
   "<string>$NODE</string><string>$ROOT/gateway/server.mjs</string><string>--office</string><string>$ROOT/out/office.json</string><string>--host</string><string>127.0.0.1</string><string>--port</string><string>8642</string><string>--admin-port</string><string>3101</string>" \
-  "$(xml_env PATH "$PATH_FOR_AGENTS" FAMIGO_GATEWAY_TOKEN "$FAMIGO_GATEWAY_TOKEN" FAMIGO_DESK_PASSWORD "$FAMIGO_DESK_PASSWORD" FAMIGO_DATA_DIR "$DATA_DIR" DESKRPG_URL http://127.0.0.1:3000)" \
+  "$(xml_env PATH "$PATH_FOR_AGENTS" FAMIGO_GATEWAY_TOKEN "$FAMIGO_GATEWAY_TOKEN" FAMIGO_DESK_PASSWORD "$FAMIGO_DESK_PASSWORD" FAMIGO_CHANNEL_PASSWORD "$FAMIGO_CHANNEL_PASSWORD" FAMIGO_DATA_DIR "$DATA_DIR" DESKRPG_URL http://127.0.0.1:3000)" \
   "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>"
 
 write_plist life.famigo.office.sync \
@@ -145,7 +195,7 @@ write_plist life.famigo.office.sync \
   </array>"
 
 unload_all
-for l in "${LABELS[@]}"; do launchctl bootstrap "gui/$UID_N" "$AGENTS/$l.plist"; done
+for l in "${LABELS[@]}"; do load_one "$l"; done
 ok "launchd 등록 (로그인 시 자동 시작)"
 
 # ── 5. DeskRPG 가 뜨면 첫 배치 ─────────────────────────────────────────
@@ -160,10 +210,5 @@ DESKRPG_URL=http://127.0.0.1:3000 bash "$ROOT/scripts/office.sh" seed
 
 echo
 ok "사무실 서버 가동"
-echo "  열기:   http://localhost:3000   (로그인 famigo-office / 비밀번호는 $ENV_FILE 의 FAMIGO_DESK_PASSWORD)"
-if (( LAN )); then
-  ip=$(ipconfig getifaddr en0 2>/dev/null || true)
-  echo "  팀원:   http://${ip:-<이 Mac 의 IP>}:3000  — 같은 네트워크에서. 각자 가입 후 사무실 비밀번호로 입장"
-fi
-echo "  관리:   http://127.0.0.1:3101   (아이디 admin · 비밀번호는 위와 같음) — 퇴장·복귀·표시 이름·직무·외형"
+access
 echo "  상태:   bash scripts/install-mac.sh --status"

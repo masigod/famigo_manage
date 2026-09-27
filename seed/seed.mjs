@@ -130,6 +130,7 @@ export async function seed({
   account,
   log = console.log,
   statePath = null,
+  channelPassword = account.password,
 }) {
   validateOffice(office);
   // 1. 계정
@@ -201,14 +202,6 @@ export async function seed({
   }
   if (departed.length)
     log(`퇴장 후보 ${departed.length}명 (Lark 명단에 없음 — 관리자 웹에서 결정): ${departed.map((p) => p.displayName ?? p.profileName).join(", ")}`);
-  if (statePath) {
-    const state = {
-      updated: new Date().toISOString(),
-      departed: departed.map((p) => ({ key: p.profileName ?? p.profile_name, display_name: p.displayName ?? p.profileName })),
-    };
-    writeFileSync(`${statePath}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 });
-    renameSync(`${statePath}.tmp`, statePath);
-  }
 
   // 4. 사무실
   const channelName = office.org.name;
@@ -221,7 +214,7 @@ export async function seed({
       name: channelName,
       description: "Lark 브리핑 데이터로 움직이는 사무실 — 보드는 Lark To-do 장부, 직원은 Lark 구성원",
       isPublic: false,
-      password: account.password,
+      password: channelPassword,
       environmentId: office.org.environment,
       groupId: group.id,
       gatewayConfig: { gatewayId: gateway.id },
@@ -229,6 +222,10 @@ export async function seed({
     log(`사무실 생성: ${channelName} (${office.org.environment})`);
   }
   const cid = encodeURIComponent(channel.id);
+  // 팀원이 들어올 때 쓰는 비밀번호. env 가 정본 — 매번 적용해 둘이 어긋나지 않게 한다.
+  await api.request("PUT", `/api/channels/${cid}`, { password: channelPassword });
+  const detail = await api.request("GET", `/api/channels/${cid}`);
+  const inviteCode = detail.channel?.inviteCode ?? null;
 
   // 기본 보드(= 장부)를 먼저 잡는다 — 첫 보드가 이벤트 운반 보드가 된다.
   await api.request("GET", `/api/channels/${cid}/kanban/board`);
@@ -245,7 +242,17 @@ export async function seed({
   }
 
   const roster = await api.request("GET", `/api/npcs?channelId=${cid}&roster=1`);
-  return { channelId: channel.id, gatewayId: gateway.id, npcs: roster.npcs?.length ?? 0 };
+  if (statePath) {
+    const state = {
+      updated: new Date().toISOString(),
+      channel_id: channel.id,
+      invite_code: inviteCode,
+      departed: departed.map((p) => ({ key: p.profileName ?? p.profile_name, display_name: p.displayName ?? p.profileName })),
+    };
+    writeFileSync(`${statePath}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 });
+    renameSync(`${statePath}.tmp`, statePath);
+  }
+  return { channelId: channel.id, gatewayId: gateway.id, npcs: roster.npcs?.length ?? 0, inviteCode };
 }
 
 async function main() {
@@ -270,9 +277,12 @@ async function main() {
     gatewayUrl: values.gateway,
     gatewayToken: token,
     account: { loginId: values.login, nickname: values.nickname, password },
+    // 옛 설치(env 에 채널 비밀번호 없음)는 소유자 비밀번호로 남는다 — install-mac.sh 를 다시 돌리면 분리된다.
+    channelPassword: process.env.FAMIGO_CHANNEL_PASSWORD || password,
     statePath: values.state,
   });
   console.log(`✓ 사무실 ${result.channelId} · 착석 직원 ${result.npcs}명 · ${values.app}/channels`);
+  if (result.inviteCode) console.log(`  초대 경로: /channels/join/${result.inviteCode} (채널 비밀번호 FAMIGO_CHANNEL_PASSWORD)`);
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) {

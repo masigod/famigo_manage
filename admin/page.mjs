@@ -54,6 +54,9 @@ export function renderAdminPage() {
   button.act:disabled { opacity: .5; cursor: default; }
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .empty { padding: 18px 16px; color: var(--muted); }
+  .row.access { grid-template-columns: minmax(150px, 1fr) minmax(200px, 3fr) auto; }
+  code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line);
+         border-radius: 8px; padding: 6px 10px; overflow-wrap: anywhere; }
   details { padding: 12px 16px; }
   summary { cursor: pointer; color: var(--muted); }
   pre { white-space: pre-wrap; font-size: 12px; background: var(--bg); border-radius: 8px; padding: 12px; max-height: 320px; overflow: auto; }
@@ -75,6 +78,13 @@ export function renderAdminPage() {
   <span class="pill" id="sync">동기화 상태 확인 중</span>
 </header>
 <main>
+  <section aria-labelledby="h-access">
+    <div class="sec-head">
+      <h2 id="h-access">팀원 초대</h2>
+      <p>팀원에게는 아래 세 가지만 알려 주세요. 소유자·관리자 비밀번호는 알려 주지 않습니다.</p>
+    </div>
+    <div class="rows" id="access"></div>
+  </section>
   <section aria-labelledby="h-members">
     <div class="sec-head">
       <h2 id="h-members">직원</h2>
@@ -180,8 +190,32 @@ export function renderAdminPage() {
       dn, role, team, look, el("div", { class: "actions" }, save, toggle));
   }
 
+  function copyRow(label, value, note) {
+    const b = el("button", { class: "act", text: "복사", disabled: !value, onclick: async () => {
+      try { await navigator.clipboard.writeText(value); toast(label + " 복사됨"); } catch { toast("복사 실패 — 직접 선택하세요"); }
+    }});
+    return el("div", { class: "row access" },
+      el("div", { class: "who" }, el("b", { text: label }), el("span", { text: note || "" })),
+      el("code", { text: value || "—" }), el("div", { class: "actions" }, b));
+  }
+
+  function renderAccess() {
+    const a = state.access || {};
+    const box = $("access");
+    if (!a.lan) {
+      box.replaceChildren(el("div", { class: "empty", text: "지금은 이 Mac 에서만 사무실이 열려 있습니다. 팀원을 들이려면 터미널에서  bash scripts/install-mac.sh --lan  을 실행하세요." }));
+      return;
+    }
+    box.replaceChildren(
+      copyRow("1. 사무실 주소", a.office_url, "같은 와이파이·사내망에서 열고 각자 가입"),
+      copyRow("2. 초대 링크", a.invite_url, a.invite_url ? "가입 후 이 링크로 들어옴" : "사무실 반영 후 생성됩니다"),
+      copyRow("3. 채널 비밀번호", a.channel_password, "초대 링크에서 입력"),
+    );
+  }
+
   function render() {
     renderSync();
+    renderAccess();
     const q = $("q").value.trim().toLowerCase();
     const list = state.members
       .filter((m) => filter === "all" || (filter === "on" ? !m.excluded : m.excluded))
