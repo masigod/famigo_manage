@@ -113,7 +113,7 @@ export function lanAddresses() {
 }
 
 /** 팀원 접속 안내 — LAN 주소로 사무실이 실제로 열려 있는지 짧게 찔러 본다. */
-async function teamAccess(seedState, channelPassword, deskPort = 3000) {
+async function teamAccess(seedState, channelPassword, deskPort = Number(process.env.FAMIGO_DESK_PORT) || 3300) {
   const ip = lanAddresses()[0] ?? null;
   let lan = false;
   if (ip) {

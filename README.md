@@ -89,13 +89,14 @@ bash scripts/install-mac.sh
 4. `office.json`을 만든다. **지금 Lark에 있는 사람 전원**이 직원이 되고, 직무와 팀은
    `people.json` L1과 이름이 맞을 때만 붙는다.
 5. launchd에 서비스 셋을 등록한다. 로그인하면 자동으로 시작되고, 죽으면 다시 뜬다.
-   - `life.famigo.office.deskrpg`: DeskRPG `v2026.927.1`, http://localhost:3000
+   - `life.famigo.office.deskrpg`: DeskRPG `v2026.927.1`, http://localhost:3300
+     (내부적으로 3301도 쓴다. 3000은 이 Mac의 다른 프로그램이 쓰고 있다. 바꾸려면 `FAMIGO_DESK_PORT=3400 bash scripts/install-mac.sh`)
    - `life.famigo.office.gateway`: Lark 게이트웨이, 127.0.0.1:8642(항상 로컬 전용)
    - `life.famigo.office.sync`: **매일 07:45와 13:45**에 명단 → 모델 → 배치를 돈다.
      07:00 브리핑 뒤에 돈다.
 6. 첫 배치를 한다. 직원을 착석시키고 사무실과 보드 두 개를 만든다.
 
-그다음 http://localhost:3000 에서 `famigo-office`로 로그인한다. 비밀번호는 `office.env`의
+그다음 http://localhost:3300 에서 `famigo-office`로 로그인한다. 비밀번호는 `office.env`의
 `FAMIGO_DESK_PASSWORD`다.
 
 | 명령 | 용도 |

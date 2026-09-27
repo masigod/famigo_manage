@@ -15,7 +15,6 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 DATA_DIR="${FAMIGO_DATA_DIR:-$HOME/famigo_campaign/briefs/data}"
 ENV_FILE="${FAMIGO_OFFICE_ENV:-$HOME/.config/famigo/office.env}"
-APP_URL="${DESKRPG_URL:-http://127.0.0.1:3000}"
 GW_PORT="${FAMIGO_GATEWAY_PORT:-8642}"
 
 # 토큰·비밀번호는 저장소가 아니라 사용자 설정 폴더에 0600 으로 둔다. 처음 한 번 생성한다.
@@ -63,6 +62,7 @@ case "${1:-}" in
     ;;
   seed)
     ensure_env
+    APP_URL="${DESKRPG_URL:-http://127.0.0.1:${FAMIGO_DESK_PORT:-3300}}"   # 포트는 office.env 에 기록돼 있다
     node seed/seed.mjs --app "$APP_URL" --gateway "http://127.0.0.1:$GW_PORT" --office out/office.json
     echo "로그인: famigo-office / \$FAMIGO_DESK_PASSWORD ($ENV_FILE)"
     ;;

@@ -9,7 +9,7 @@
 //
 // 사용:
 //   FAMIGO_GATEWAY_TOKEN=... FAMIGO_DESK_PASSWORD=... \
-//   node seed/seed.mjs --app http://127.0.0.1:3000 --gateway http://127.0.0.1:8642 --office out/office.json
+//   node seed/seed.mjs --app http://127.0.0.1:3300 --gateway http://127.0.0.1:8642 --office out/office.json
 
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
@@ -258,7 +258,7 @@ export async function seed({
 async function main() {
   const { values } = parseArgs({
     options: {
-      app: { type: "string", default: "http://127.0.0.1:3000" },
+      app: { type: "string", default: `http://127.0.0.1:${process.env.FAMIGO_DESK_PORT || 3300}` },
       gateway: { type: "string", default: "http://127.0.0.1:8642" },
       office: { type: "string", default: "out/office.json" },
       state: { type: "string", default: "out/seed_state.json" },
