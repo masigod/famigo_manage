@@ -135,3 +135,13 @@ test("시더는 이름이 지워진 모델을 받으면 이유를 말하고 멈�
   assert.throws(() => validateOffice(office), /display_name 없음 — 게이트가 이름 키를 지웠는지/);
   assert.doesNotThrow(() => validateOffice({ ...office, members: [{ key: "a", display_name: "A" }] }));
 });
+
+test("퇴장: 조금 사라지면 정리, 한꺼번에 절반 넘게면 멈춘다", async () => {
+  const { retirePlan } = await import("../seed/seed.mjs");
+  assert.equal(retirePlan(10, 0).retire, false);
+  assert.equal(retirePlan(10, 2).retire, true);
+  assert.equal(retirePlan(4, 3).retire, true); // 소수는 절반을 넘어도 정리 (3명 이하)
+  assert.equal(retirePlan(10, 6).retire, false);
+  assert.match(retirePlan(10, 6).reason, /FAMIGO_ALLOW_MASS_RETIRE=1/);
+  assert.equal(retirePlan(10, 6, true).retire, true);
+});

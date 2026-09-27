@@ -66,35 +66,54 @@ DeskRPG (npx deskrpg start)              3D 사무실 · 칸반 · 사무실 채
 - 직원의 대화는 `office.json`에 있는 사실만 말한다. 없는 것은 "없음"이 아니라
   "기록 없음/이 창에 없음"으로 말한다.
 
-## Mac에서 띄우기
+## Mac을 사무실 서버로 (설치 한 번)
+
+Lark 수집 파이프라인, 자격증명, 데이터가 모두 이 Mac에 있으므로 **서버도 이 Mac**이다.
+데이터는 Mac 밖으로 나가지 않는다.
 
 ```bash
 git clone https://github.com/masigod/famigo_manage.git ~/famigo_manage && cd ~/famigo_manage
-
-# 0) 원천 스키마 점검 — 이 저장소는 원천 스키마를 소유하지 않는다. 먼저 무엇이 맞는지 본다.
-bash scripts/office.sh doctor
-
-# 1) (선택) 구성원별 외형·별칭 설정
-cp config/office.config.example.json config/office.config.json   # 로컬 전용
-
-# 2) DeskRPG — 한 번 init, 이후 start
-npx deskrpg init && npx deskrpg start          # http://localhost:3000
-
-# 3) 오피스 모델 → 게이트웨이 → 배치
-bash scripts/office.sh build
-bash scripts/office.sh gateway                 # 별도 터미널에 계속 띄워 둔다
-bash scripts/office.sh seed                    # 로그인 정보가 ~/.config/famigo/office.env 에 생긴다
+bash scripts/install-mac.sh
 ```
 
-브라우저에서 `http://localhost:3000`을 열고 `famigo-office`로 로그인하면 **아울러스 · Famigo**
-사무실이 있다.
+이 한 줄이 하는 일:
 
-**매일 갱신**: 게이트웨이는 `out/office.json`의 수정 시각이 바뀌면 재시작 없이 다시 읽는다.
-그래서 브리핑 루틴의 대시보드 재생성 단계 뒤에 아래 한 줄만 붙이면 사무실이 매일 아침 바뀐다.
+1. 전제를 확인한다. node 20 이상, python3, `~/famigo_campaign/briefs/data`,
+   `~/.config/famigo/lark_credentials.json`이 있어야 한다.
+2. 비밀값을 만든다. `~/.config/famigo/office.env`(0600)에 게이트웨이 토큰, 사무실 비밀번호,
+   JWT 비밀을 둔다.
+3. **Lark API로 실제 구성원 명단을 수집한다**(`office/lark_roster.py`).
+   - 앱 `famigo_larkchat`이 들어가 있는 내부 방의 구성원을 합친다.
+   - 봇 방, 외부 방, 해산된 방, 다른 테넌트 사람은 뺀다.
+   - 메시지는 읽지 않는다. 읽는 것은 방 목록과 구성원 이름뿐이다(GET만 사용).
+4. `office.json`을 만든다. **지금 Lark에 있는 사람 전원**이 직원이 되고, 직무와 팀은
+   `people.json` L1과 이름이 맞을 때만 붙는다.
+5. launchd에 서비스 셋을 등록한다. 로그인하면 자동으로 시작되고, 죽으면 다시 뜬다.
+   - `life.famigo.office.deskrpg`: DeskRPG `v2026.927.1`, http://localhost:3000
+   - `life.famigo.office.gateway`: Lark 게이트웨이, 127.0.0.1:8642(항상 로컬 전용)
+   - `life.famigo.office.sync`: **매일 07:45와 13:45**에 명단 → 모델 → 배치를 돈다.
+     07:00 브리핑 뒤에 돈다.
+6. 첫 배치를 한다. 직원을 착석시키고 사무실과 보드 두 개를 만든다.
 
-```bash
-bash ~/famigo_manage/scripts/office.sh build
-```
+그다음 http://localhost:3000 에서 `famigo-office`로 로그인한다. 비밀번호는 `office.env`의
+`FAMIGO_DESK_PASSWORD`다.
+
+| 명령 | 용도 |
+|---|---|
+| `bash scripts/install-mac.sh --status` | 서비스, 응답, 데이터 기준 시각 점검 |
+| `bash scripts/install-mac.sh --lan` | **같은 네트워크의 팀원도 접속하게 연다.** 실명이 보이는 사무실이라 신중히. 기본은 이 Mac에서만 접속 가능 |
+| `bash scripts/office.sh doctor` | 원천 스키마 점검. 어떤 필드가 맞았는지, 명단과 people.json이 몇 명 겹치는지 |
+| `bash scripts/office.sh sync` | 지금 바로 갱신 |
+| `bash scripts/install-mac.sh --uninstall` | 서비스 제거. 데이터는 남긴다 |
+
+로그는 `~/Library/Logs/famigo-office/`에 쌓인다.
+
+**구성원 변화**
+- Lark에 새로 들어온 사람은 다음 sync 때 직원으로 등록된다.
+- Lark에서 사라진 사람은 퇴장한다.
+- 한 번에 절반 넘게 사라지면 데이터 사고로 보고 **퇴장하지 않고 멈춘다.**
+  확인한 뒤 `FAMIGO_ALLOW_MASS_RETIRE=1`로 다시 돌린다.
+- 직원 키는 이름에서 만든다. 명단 수집이 하루 실패해도 같은 사람은 같은 자리에 남는다.
 
 ## 검증된 것과 아직 아닌 것
 
@@ -105,9 +124,13 @@ bash ~/famigo_manage/scripts/office.sh build
 - Syn을 호출하면 걸어와서 결정 대기와 방치 항목을 경과일과 함께 답한다.
 - 카드 생성은 403 `read_only`로 거절되고, 그 사유가 사무실 화면에 전달된다.
 - 시드를 두 번 실행해도 아무것도 새로 생기지 않는다(멱등).
-- 테스트: `npm test` (Python 10, Node 9).
+- 테스트: `npm test` (Python 18, Node 10).
+- Lark 명단 수집기는 공식 SDK(`larksuite/oapi-sdk-python`) 응답 모델 그대로 만든 가짜 서버로
+  테스트했다. 페이지 넘김, 봇·외부·해산 방 제외, 외부 테넌트 제외, open_id와 비밀값 미저장,
+  실패 시 기존 명단 보존을 확인했다. 새 직원 등록과 퇴장 처리는 실제 DeskRPG에서 확인했다.
 
-**아직 아님** — 실제 Lark 데이터로는 돌려 보지 않았다. 원천 파일(`people.json` 등)의 실제
+**아직 아님** — 실제 Lark API와 데이터로는 돌려 보지 않았다. 클라우드 샌드박스에서는 Lark 도메인이
+네트워크 정책으로 막혀 있다. 원천 파일(`people.json` 등)의 실제
 필드명은 이 저장소 밖(Mac)에 있다.
 - 빌더는 필드를 **후보 목록**으로 읽는다. `doctor`가 실제로 어떤 필드가 맞았는지 보고한다.
 - 맞는 필드가 없으면 그 값은 비어 있게 된다. 추측으로 채우지 않는다.
@@ -120,12 +143,14 @@ bash ~/famigo_manage/scripts/office.sh build
 ## 구조
 
 ```
-office/build_office.py     Lark 데이터층 → office.json (게이트 · doctor)
+office/lark_roster.py      Lark API → 실제 구성원 명단 (읽기 전용)
+office/build_office.py     Lark 데이터층 + 명단 → office.json (게이트 · doctor)
 gateway/server.mjs         Hermes/deskrpg 플러그인 계약 게이트웨이 (읽기 전용)
 gateway/office-model.mjs   office.json → 칸반 카드
 gateway/replies.mjs        직원·Syn 대화 (LLM 없음, 사실만)
 seed/seed.mjs              DeskRPG REST 배치 (멱등)
 seed/looks.mjs             DeskRPG 오피스 룩 50종 (deskrpg 소스에서 추출)
-scripts/office.sh          build · doctor · gateway · seed
+scripts/office.sh          roster · build · doctor · gateway · seed · sync
+scripts/install-mac.sh     Mac 상시 서버 설치 (launchd)
 tests/                     합성 픽스처 + 회귀 테스트 (가상 이름·가상 캠페인)
 ```

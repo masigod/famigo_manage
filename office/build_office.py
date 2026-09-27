@@ -326,7 +326,7 @@ def todo_status(todo: dict) -> str:
     return "todo"
 
 
-def build_office(data_dir: Path, config: dict, now: dt.datetime) -> tuple[dict, dict]:
+def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | None = None) -> tuple[dict, dict]:
     hits: dict[str, set] = {}
     people = load_people(data_dir, hits)
     rooms = load_rooms(data_dir, now, hits)
@@ -338,18 +338,40 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime) -> tuple[dict, 
     exclude = set(config.get("exclude", []))
     used: set[str] = set()
     members = []
-    for p in people:
-        cfg = member_cfg.get(p["name"], {})
-        if p["name"] in exclude or cfg.get("include") is False or p["active"] is False:
+
+    def person_of(name: str) -> dict | None:
+        low = name.lower()
+        return next((p for p in people if low in {a.lower() for a in (p["name"], *p["aliases"])}), None)
+
+    if roster:
+        # Lark 에 지금 있는 사람 전원이 직원이다. 직무·팀은 people.json L1 에서 이름이 맞을 때만.
+        entries = []
+        for r in roster.get("members", []):
+            p = person_of(r["name"]) or {"name": r["name"], "role": None, "team": None, "aliases": [], "active": None}
+            entries.append((r, p))
+        roster_names = {r["name"] for r, _ in entries}
+        dropped = [p["name"] for p in people if not ({p["name"], *p["aliases"]} & roster_names)]
+    else:
+        entries = [(None, p) for p in people]
+        dropped = []
+
+    for r, p in entries:
+        name = r["name"] if r else p["name"]
+        cfg = member_cfg.get(name, {})
+        if name in exclude or cfg.get("include") is False or p["active"] is False:
             continue
+        # 키는 이름에서만 만든다 — 명단이 있든 없든 같은 사람은 같은 키(= 같은 NPC)가 된다.
+        key = cfg.get("profile") or profile_slug(name, used)
+        used.add(key)
         members.append(
             {
-                "key": cfg.get("profile") or profile_slug(p["name"], used),
-                "display_name": cfg.get("display_name") or p["name"],
+                "key": key,
+                "display_name": cfg.get("display_name") or name,
                 "role": cfg.get("role") or p["role"],
                 "team": cfg.get("team") or p["team"],
                 "look": cfg.get("look"),
-                "aliases": sorted({p["name"], *p["aliases"], *cfg.get("aliases", [])}),
+                "aliases": sorted({name, p["name"], *p["aliases"], *cfg.get("aliases", [])}),
+                "rooms": r["rooms"] if r else [],
                 "kind": "member",
             }
         )
@@ -444,6 +466,16 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime) -> tuple[dict, 
             for name in ("people.json", "rooms.json", "todos.jsonl", "campaigns.json", "lark_daily.jsonl")
         },
         "matched_fields": {k: sorted(v) for k, v in sorted(hits.items())},
+        "roster": (
+            {
+                "generated_at": roster.get("generated_at"),
+                "members": len(roster.get("members", [])),
+                "people_json_matched": sum(1 for m in members if m["kind"] == "member" and (m["role"] or m["team"])),
+                "people_json_not_in_lark": len(dropped),
+            }
+            if roster
+            else "없음 (people.json 만 사용)"
+        ),
         "counts": counts,
     }
     return office, report
@@ -485,6 +517,7 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--tools-dir", type=Path, help="lark_store.py 위치 (기본: <data-dir>/../tools)")
     ap.add_argument("--config", type=Path, default=Path("config/office.config.json"))
     ap.add_argument("--out", type=Path, default=Path("out/office.json"))
+    ap.add_argument("--roster", type=Path, default=Path("out/lark_roster.json"), help="lark_roster.py 산출물 (없으면 people.json 만)")
     ap.add_argument("--now", help="기준 시각 ISO (테스트용). 기본: 지금 KST")
     ap.add_argument("--doctor", action="store_true", help="원천 스키마 점검 결과만 출력")
     ap.add_argument("--allow-no-gate", action="store_true", help="게이트 없이 진행 (합성 픽스처 테스트 전용)")
@@ -498,7 +531,8 @@ def main(argv: list[str] | None = None) -> int:
     now = parse_time(args.now) if args.now else dt.datetime.now(KST)
 
     try:
-        office, report = build_office(data_dir, config or {}, now)
+        roster = read_json(args.roster) if args.roster and args.roster.exists() else None
+        office, report = build_office(data_dir, config or {}, now, roster)
     except SourceError as e:
         print(f"✗ {e}", file=sys.stderr)
         return 2

@@ -1,12 +1,14 @@
 #!/usr/bin/env bash
 # Famigo Office — Lark 브리핑 데이터를 DeskRPG 3D 사무실로.
 #
-#   bash scripts/office.sh build     # Lark 데이터층 → out/office.json (반출 게이트 통과)
+#   bash scripts/office.sh roster    # Lark API → out/lark_roster.json (지금 Lark 에 있는 구성원 전원)
+#   bash scripts/office.sh build     # Lark 데이터층 + 명단 → out/office.json (반출 게이트 통과)
 #   bash scripts/office.sh doctor    # 원천 스키마 점검만 (어떤 필드가 맞았는지)
 #   bash scripts/office.sh gateway   # famigo Lark 게이트웨이 (127.0.0.1:8642)
 #   bash scripts/office.sh seed      # DeskRPG 에 직원·사무실·보드 배치 (멱등)
+#   bash scripts/office.sh sync      # roster → build → seed (launchd 가 하루 두 번 부른다)
 #
-# DeskRPG 자체는 따로 띄운다:  npx deskrpg init && npx deskrpg start   (http://localhost:3000)
+# 상시 서버로 설치:  bash scripts/install-mac.sh
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
@@ -34,11 +36,22 @@ ensure_env() {
 
 cd "$ROOT"
 case "${1:-}" in
+  roster)
+    python3 office/lark_roster.py --out out/lark_roster.json
+    ;;
   build)
-    python3 office/build_office.py --data-dir "$DATA_DIR" --config config/office.config.json --out out/office.json
+    python3 office/build_office.py --data-dir "$DATA_DIR" --config config/office.config.json \
+      --roster out/lark_roster.json --out out/office.json
+    ;;
+  sync)
+    echo "── sync $(date '+%F %T')"
+    # 명단 수집 실패는 전체 실패가 아니다 — 직전 명단으로 계속 간다. 사유는 로그에 남는다.
+    bash "$ROOT/scripts/office.sh" roster || echo "⚠ 명단 수집 실패 — 직전 명단 유지"
+    bash "$ROOT/scripts/office.sh" build
+    bash "$ROOT/scripts/office.sh" seed
     ;;
   doctor)
-    python3 office/build_office.py --data-dir "$DATA_DIR" --doctor
+    python3 office/build_office.py --data-dir "$DATA_DIR" --roster out/lark_roster.json --doctor
     ;;
   gateway)
     ensure_env
@@ -50,7 +63,7 @@ case "${1:-}" in
     echo "로그인: famigo-office / \$FAMIGO_DESK_PASSWORD ($ENV_FILE)"
     ;;
   *)
-    sed -n '2,9p' "$0"
+    sed -n '2,11p' "$0"
     exit 1
     ;;
 esac

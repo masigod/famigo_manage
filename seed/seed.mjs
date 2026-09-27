@@ -86,7 +86,29 @@ export function validateOffice(office) {
   if (problems.length) throw new Error(`office.json 을 쓸 수 없다:\n  - ${problems.join("\n  - ")}`);
 }
 
-export async function seed({ api, office, gatewayUrl, gatewayToken, account, log = console.log }) {
+/**
+ * 한 번에 절반 넘게 사라지면 조직 변화가 아니라 데이터 사고(명단 스키마 변경·게이트가 이름을 지움)일
+ * 가능성이 크다. 그때는 지우지 않고 멈춰 사람이 보게 한다.
+ */
+export function retirePlan(existing, gone, allowMass = false) {
+  if (gone === 0) return { retire: false, reason: "" };
+  if (!allowMass && gone > 3 && gone * 2 > existing)
+    return {
+      retire: false,
+      reason: `${existing}명 중 ${gone}명이 한꺼번에 사라졌다 — 데이터부터 확인. 맞으면 FAMIGO_ALLOW_MASS_RETIRE=1`,
+    };
+  return { retire: true, reason: "" };
+}
+
+export async function seed({
+  api,
+  office,
+  gatewayUrl,
+  gatewayToken,
+  account,
+  log = console.log,
+  allowMassRetire = false,
+}) {
   validateOffice(office);
   // 1. 계정
   const login = await api.send("POST", "/api/auth/login", { loginId: account.loginId, password: account.password });
@@ -117,7 +139,8 @@ export async function seed({ api, office, gatewayUrl, gatewayToken, account, log
   const gid = encodeURIComponent(gateway.id);
 
   // 3. 구성원 = 프로필 = NPC
-  const { profiles = [] } = await api.request("GET", `/api/gateways/${gid}/profiles`);
+  const { profiles: listed } = await api.request("GET", `/api/gateways/${gid}/profiles`);
+  const profiles = Array.isArray(listed) ? listed : [];
   const byName = new Map(profiles.map((p) => [p.profileName ?? p.profile_name, p]));
   for (const m of assignLooks(office.members)) {
     let p = byName.get(m.key);
@@ -133,6 +156,16 @@ export async function seed({ api, office, gatewayUrl, gatewayToken, account, log
       displayName: m.display_name,
       appearance: appearance(m.look),
     });
+  }
+
+  // 3-1. Lark 에서 사라진 직원은 퇴장 — 이 게이트웨이의 프로필만 본다. Lark 가 정본이다.
+  const keep = new Set(office.members.map((m) => m.key));
+  const gone = profiles.filter((p) => !keep.has(p.profileName ?? p.profile_name));
+  const { retire, reason } = retirePlan(profiles.length, gone.length, allowMassRetire);
+  if (!retire && gone.length) log(`⚠ 퇴장 보류: ${reason}`);
+  for (const p of retire ? gone : []) {
+    await api.request("DELETE", `/api/gateways/${gid}/profiles/${encodeURIComponent(p.id)}`);
+    log(`퇴장: ${p.displayName ?? p.profileName} (Lark 에 없음)`);
   }
 
   // 4. 사무실
@@ -194,6 +227,7 @@ async function main() {
     gatewayUrl: values.gateway,
     gatewayToken: token,
     account: { loginId: values.login, nickname: values.nickname, password },
+    allowMassRetire: process.env.FAMIGO_ALLOW_MASS_RETIRE === "1",
   });
   console.log(`✓ 사무실 ${result.channelId} · 착석 직원 ${result.npcs}명 · ${values.app}/channels`);
 }

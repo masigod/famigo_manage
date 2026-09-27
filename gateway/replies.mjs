@@ -39,6 +39,11 @@ function memberReply(member, office) {
   if (campaigns.length) {
     out.push("", `**맡은 캠페인 ${campaigns.length}건** — ${campaigns.map((c) => `${c.title}(${c.stage})`).join(", ")}`);
   }
+  const rooms = member.rooms ?? [];
+  if (rooms.length) {
+    const shown = rooms.slice(0, 8).join(", ");
+    out.push("", `**참여 중인 Lark 방 ${rooms.length}개** — ${shown}${rooms.length > 8 ? ` 외 ${rooms.length - 8}` : ""}`);
+  }
   out.push("", `_기준 ${office.generated_at} Lark 브리핑 데이터_`);
   return out.join("\n");
 }
