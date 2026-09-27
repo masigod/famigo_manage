@@ -63,7 +63,7 @@ load_one() {
 access() {
   # shellcheck disable=SC1090
   [[ -f "$ENV_FILE" ]] && { set -a; source "$ENV_FILE"; set +a; }
-  local host ip code lan
+  local host ip code
   host=$(/usr/libexec/PlistBuddy -c "Print :EnvironmentVariables:HOSTNAME" "$AGENTS/life.famigo.office.deskrpg.plist" 2>/dev/null || echo "?")
   ip=$(ipconfig getifaddr en0 2>/dev/null || ipconfig getifaddr en1 2>/dev/null || true)
   code=$(python3 -c "import json;print(json.load(open('$ROOT/out/seed_state.json')).get('invite_code') or '')" 2>/dev/null || true)
@@ -87,7 +87,8 @@ stop_stale_deskrpg() {
   local pids=() pid cmd
   [[ -f "$DESK_PIDFILE" ]] && pids+=("$(cat "$DESK_PIDFILE" 2>/dev/null)")
   while read -r pid; do [[ -n "$pid" ]] && pids+=("$pid"); done < <(lsof -nP -t -iTCP:"$DESK_PORT" -iTCP:"$((DESK_PORT + 1))" -sTCP:LISTEN 2>/dev/null)
-  for pid in "${pids[@]}"; do
+  # macOS 기본 bash 3.2 는 set -u 에서 빈 배열 "${pids[@]}" 를 unbound 로 죽는다 — 비었을 때를 따로 둔다.
+  for pid in ${pids[@]+"${pids[@]}"}; do
     [[ "$pid" =~ ^[0-9]+$ ]] || continue
     cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
     if [[ "$cmd" == *deskrpg* ]]; then   # 고아 서버: …/node_modules/deskrpg/server.js
@@ -122,7 +123,8 @@ status() {
   echo "── 열린 포트"
   for port in "$DESK_PORT" "$((DESK_PORT + 1))" 8642 3101; do
     # 리스너를 전부 보인다 — 같은 포트에 두 프로그램이 서로 다른 주소로 붙어 있을 수 있다(macOS 는 허용).
-    lines=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $1" pid "$2" "$9}' | sort -u)
+    # 리스너가 없으면 lsof 가 1 을 내고, pipefail + set -e 가 스크립트를 끊는다 → || true
+    lines=$(lsof -nP -iTCP:"$port" -sTCP:LISTEN 2>/dev/null | awk 'NR>1 {print $1" pid "$2" "$9}' | sort -u || true)
     if [[ -z "$lines" ]]; then echo "  $port: 닫힘"; else echo "$lines" | sed "s/^/  $port: /"; fi
   done
   echo "  로그: $LOGS"
