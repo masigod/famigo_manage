@@ -49,6 +49,7 @@ export function ledgerCard(item, office) {
     `Lark 장부 ${item.id} · 종류 ${item.kind ?? "미기록"} · 원천 상태 ${item.source_status}`,
     `경과 ${daysLabel(age)}${item.stale ? " — 7일 넘게 안 움직였다" : ""}`,
     item.room ? `방: ${item.room}` : null,
+    item.due ? `마감: ${item.due}` : null,
     item.assignee ? null : "담당: Lark 장부에 담당자 기록 없음",
   ].filter(Boolean);
   return {
@@ -65,6 +66,16 @@ export function ledgerCard(item, office) {
   };
 }
 
+function campaignLines(c) {
+  if (!c) return ["캠페인 레지스트리: 연결된 캠페인 없음"];
+  return [
+    `캠페인: ${c.name}${c.status ? ` · 레지스트리 상태 ${c.status}` : ""}`,
+    c.launch || c.end ? `런칭 ${c.launch ?? "미기록"} · 종료 ${c.end ?? "미기록"}` : null,
+    c.idle_days !== null && c.idle_days !== undefined ? `캠페인 언급 없음 ${c.idle_days}일` : null,
+    c.wbs_count ? `WBS ${c.wbs_count}건 · 마지막 ${c.wbs_last ?? "날짜 미기록"} (원문 줄은 Lark 에서)` : null,
+  ].filter(Boolean);
+}
+
 export function pipelineCard(item, office) {
   const quiet = item.quiet_days;
   const lines = [
@@ -72,6 +83,7 @@ export function pipelineCard(item, office) {
     `마지막 사람 발화 이후 ${daysLabel(quiet)}`,
     item.zombie ? "⚠ 좀비 후보 — 진행중·준비중인데 21일 이상 조용. 막힌 것인지 죽은 것인지 판정 필요" : null,
     item.external ? "외부 방 — 이름·주제까지만" : null,
+    ...campaignLines(item.campaign),
   ].filter(Boolean);
   return {
     id: `C-${item.id}`,

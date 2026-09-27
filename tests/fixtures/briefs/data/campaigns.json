@@ -1,1 +1,17 @@
-{"가상 캠페인 A": {"owner": "찰리", "room": "진행중 - 가상 캠페인 A"}}
+{
+  "갱신": "2026-09-27",
+  "_manual": {
+    "설명": "사람이 고친 것",
+    "exclude": ["필드명 오탐"],
+    "merge": {"가상 캠페인 A": ["캠페인A"]},
+    "status_override": {}
+  },
+  "campaigns": [
+    {"name": "가상 캠페인 A", "kind": "campaign", "type": "FGD", "owner": "찰리", "owners": ["찰리", "Alpha Kim"],
+     "status": "진행중", "status_src": "room", "start": "2026-09-01", "last_seen": "2026-09-22", "idle_days": 5,
+     "mentions": 40, "metrics": ["SHOULD-NOT-COPY-METRIC"], "launch": "2026-09-05",
+     "wbs": [{"d": "2026-09-05", "t": "SHOULD-NOT-COPY-WBS", "who": "찰리"}, {"d": "2026-09-20", "t": "x", "who": "Alpha Kim"}],
+     "seen_in": ["진행중 - 가상 캠페인 A"], "evidence": "SHOULD-NOT-COPY-EVIDENCE"},
+    {"name": "필드명 오탐", "owner": "Bravo Lee", "status": "진행중", "seen_in": ["준비중 - 가상 캠페인 B"]}
+  ]
+}

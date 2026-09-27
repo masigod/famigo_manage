@@ -14,9 +14,9 @@ class ShapeTest(unittest.TestCase):
             [sys.executable, str(ROOT / "office" / "shape.py"), "--data-dir", str(ROOT / "tests/fixtures/briefs/data")],
             capture_output=True, text=True, check=True,
         ).stdout
-        for value in ("p_alpha", "p_delta", "Alpha", "Bravo", "찰리", "가상", "SHOULD-NEVER", "운영 매니저", "oc_1", "T001", "2026-09"):
+        for value in ("p_alpha", "p_delta", "Alpha", "Bravo", "찰리", "가상", "SHOULD-NEVER", "운영 매니저", "oc_1", "T001", "2026-09-2", "2026-08-", "SHOULD-NOT-COPY"):
             self.assertNotIn(value, out)
-        for key in ("L1", "chat_id", "last_human_at", "who" if False else "owner", "str(date)"):
+        for key in ("L1", "chat_id", "last_seen", "owners", "str(date)", "<map: 4 keys>"):
             self.assertIn(key, out)
 
 

@@ -11,7 +11,7 @@
 //   FAMIGO_GATEWAY_TOKEN=... FAMIGO_DESK_PASSWORD=... \
 //   node seed/seed.mjs --app http://127.0.0.1:3000 --gateway http://127.0.0.1:8642 --office out/office.json
 
-import { readFileSync } from "node:fs";
+import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { parseArgs } from "node:util";
 import { OFFICE_LOOKS, OFFICE_LOOK_IDS } from "./looks.mjs";
@@ -51,18 +51,35 @@ export function createApi(appBaseUrl, fetchImpl = globalThis.fetch) {
   };
 }
 
-/** 구성원 → 외형. 설정에 있으면 그것, 없으면 이름 해시로 고정 배정(겹치지 않게). */
-export function assignLooks(members) {
-  const used = new Set(members.map((m) => m.look).filter(Boolean));
-  const free = OFFICE_LOOK_IDS.filter((id) => !used.has(id));
-  return members.map((m) => {
-    if (m.look && OFFICE_LOOK_IDS.includes(m.look)) return { ...m, look: m.look };
-    const h = parseInt(createHash("sha1").update(m.key).digest("hex").slice(0, 8), 16);
-    const pool = free.length ? free : OFFICE_LOOK_IDS;
-    const look = pool[h % pool.length];
-    free.splice(free.indexOf(look), 1);
-    return { ...m, look };
-  });
+/**
+ * 구성원 → 외형. 우선순위: 관리자 설정 > 지금 사무실에서의 외형(유지) > 새 사람만 자동 배정.
+ * 자동 배정은 키 해시에서 시작해 비어 있는 외형을 차례로 찾는다 — 다른 사람의 설정이 바뀌어도
+ * 이미 앉아 있는 사람의 외형은 흔들리지 않는다(회귀: 한 명을 바꾸면 전원이 다시 섞였다).
+ */
+export function assignLooks(members, current = new Map()) {
+  const valid = (id) => OFFICE_LOOK_IDS.includes(id);
+  const chosen = new Map();
+  for (const m of members) if (m.look && valid(m.look)) chosen.set(m.key, m.look);
+  for (const m of members) {
+    const now = current.get(m.key);
+    if (!chosen.has(m.key) && now && valid(now)) chosen.set(m.key, now);
+  }
+  const taken = new Set(chosen.values());
+  for (const m of [...members].sort((a, b) => a.key.localeCompare(b.key))) {
+    if (chosen.has(m.key)) continue;
+    const start = parseInt(createHash("sha1").update(m.key).digest("hex").slice(0, 8), 16) % OFFICE_LOOK_IDS.length;
+    let look = OFFICE_LOOK_IDS[start];
+    for (let i = 0; i < OFFICE_LOOK_IDS.length; i += 1) {
+      const candidate = OFFICE_LOOK_IDS[(start + i) % OFFICE_LOOK_IDS.length];
+      if (!taken.has(candidate)) {
+        look = candidate;
+        break;
+      }
+    }
+    chosen.set(m.key, look);
+    taken.add(look);
+  }
+  return members.map((m) => ({ ...m, look: chosen.get(m.key) }));
 }
 
 /** DeskRPG officeLookAppearance(id) 와 같은 정본 두 키. */
@@ -87,17 +104,22 @@ export function validateOffice(office) {
 }
 
 /**
- * 한 번에 절반 넘게 사라지면 조직 변화가 아니라 데이터 사고(명단 스키마 변경·게이트가 이름을 지움)일
- * 가능성이 크다. 그때는 지우지 않고 멈춰 사람이 보게 한다.
+ * 퇴장은 사람이 정한다. 자동으로 지우는 것은 두 경우뿐이다:
+ *   - 관리자 웹에서 퇴장시킨 사람(office.excluded_keys)
+ *   - 플레이어 본인(아바타로 이미 사무실에 있다)
+ * Lark 명단에서 사라진 사람은 지우지 않고 '퇴장 후보'로 남겨 관리자 웹에 보인다.
  */
-export function retirePlan(existing, gone, allowMass = false) {
-  if (gone === 0) return { retire: false, reason: "" };
-  if (!allowMass && gone > 3 && gone * 2 > existing)
-    return {
-      retire: false,
-      reason: `${existing}명 중 ${gone}명이 한꺼번에 사라졌다 — 데이터부터 확인. 맞으면 FAMIGO_ALLOW_MASS_RETIRE=1`,
-    };
-  return { retire: true, reason: "" };
+export function classifyProfiles(profiles, keepKeys, excludedKeys, isPlayerProfile) {
+  const retire = [];
+  const departed = [];
+  for (const p of profiles) {
+    const key = p.profileName ?? p.profile_name;
+    if (keepKeys.has(key)) continue;
+    if (isPlayerProfile(p)) retire.push({ profile: p, why: "플레이어 본인" });
+    else if (excludedKeys.has(key)) retire.push({ profile: p, why: "관리자 퇴장" });
+    else departed.push(p);
+  }
+  return { retire, departed };
 }
 
 export async function seed({
@@ -107,7 +129,7 @@ export async function seed({
   gatewayToken,
   account,
   log = console.log,
-  allowMassRetire = false,
+  statePath = null,
 }) {
   validateOffice(office);
   // 1. 계정
@@ -147,7 +169,10 @@ export async function seed({
     [m.display_name, ...(m.aliases ?? [])].some((n) => n?.toLowerCase() === account.nickname.toLowerCase());
   const members = office.members.filter((m) => m.kind !== "member" || !isPlayer(m));
   if (members.length < office.members.length) log(`플레이어 본인(${account.nickname})은 NPC 로 두지 않음`);
-  for (const m of assignLooks(members)) {
+  const current = new Map(
+    profiles.map((p) => [p.profileName ?? p.profile_name, (p.appearance ?? {}).officeLookId]).filter(([, id]) => id),
+  );
+  for (const m of assignLooks(members, current)) {
     let p = byName.get(m.key);
     if (!p) {
       ({ profile: p } = await api.request("POST", `/api/gateways/${gid}/profiles`, {
@@ -163,16 +188,26 @@ export async function seed({
     });
   }
 
-  // 3-1. Lark 에서 사라진 직원은 퇴장 — 이 게이트웨이의 프로필만 본다. Lark 가 정본이다.
-  const keep = new Set(members.map((m) => m.key));
-  const gone = profiles.filter((p) => !keep.has(p.profileName ?? p.profile_name));
-  const { retire, reason } = retirePlan(profiles.length, gone.length, allowMassRetire);
-  if (!retire && gone.length) log(`⚠ 퇴장 보류: ${reason}`);
-  for (const p of retire ? gone : []) {
+  // 3-1. 퇴장 — 이 게이트웨이의 프로필만 본다.
+  const { retire, departed } = classifyProfiles(
+    profiles,
+    new Set(members.map((m) => m.key)),
+    new Set(office.excluded_keys ?? []),
+    (p) => (p.displayName ?? p.display_name ?? "").toLowerCase() === account.nickname.toLowerCase(),
+  );
+  for (const { profile: p, why } of retire) {
     await api.request("DELETE", `/api/gateways/${gid}/profiles/${encodeURIComponent(p.id)}`);
-    const key = p.profileName ?? p.profile_name;
-    const why = office.members.some((m) => m.key === key) ? "플레이어 본인" : "Lark 에 없음";
-    log(`퇴장: ${p.displayName ?? key} (${why})`);
+    log(`퇴장: ${p.displayName ?? p.profileName} (${why})`);
+  }
+  if (departed.length)
+    log(`퇴장 후보 ${departed.length}명 (Lark 명단에 없음 — 관리자 웹에서 결정): ${departed.map((p) => p.displayName ?? p.profileName).join(", ")}`);
+  if (statePath) {
+    const state = {
+      updated: new Date().toISOString(),
+      departed: departed.map((p) => ({ key: p.profileName ?? p.profile_name, display_name: p.displayName ?? p.profileName })),
+    };
+    writeFileSync(`${statePath}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 });
+    renameSync(`${statePath}.tmp`, statePath);
   }
 
   // 4. 사무실
@@ -219,6 +254,7 @@ async function main() {
       app: { type: "string", default: "http://127.0.0.1:3000" },
       gateway: { type: "string", default: "http://127.0.0.1:8642" },
       office: { type: "string", default: "out/office.json" },
+      state: { type: "string", default: "out/seed_state.json" },
       login: { type: "string", default: process.env.FAMIGO_DESK_LOGIN ?? "famigo-office" },
       nickname: { type: "string", default: process.env.FAMIGO_DESK_NICKNAME ?? "Dylan" },
     },
@@ -234,7 +270,7 @@ async function main() {
     gatewayUrl: values.gateway,
     gatewayToken: token,
     account: { loginId: values.login, nickname: values.nickname, password },
-    allowMassRetire: process.env.FAMIGO_ALLOW_MASS_RETIRE === "1",
+    statePath: values.state,
   });
   console.log(`✓ 사무실 ${result.channelId} · 착석 직원 ${result.npcs}명 · ${values.app}/channels`);
 }

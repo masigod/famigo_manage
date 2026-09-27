@@ -1,2 +1,2 @@
-{"date": "2026-09-26", "rooms_swept": 8, "rooms_failed": 0, "human_messages": 0, "dm_count": 0, "rooms": ["should", "not", "copy"]}
-{"date": "2026-09-27", "rooms_swept": 8, "rooms_failed": 0, "human_messages": 3, "dm_count": 0, "status": "ok", "Raw Text": "SHOULD-NEVER-APPEAR"}
+{"date": "2026-09-26", "window_hours": 24, "status": "ok", "rooms": [{"name": "should", "msgs": 1}], "totals": {"group_rooms_active": 0, "msgs_group": 0, "rooms_unread_failed": 0}}
+{"date": "2026-09-27", "window_hours": 24, "status": "ok", "rooms": [{"name": "SHOULD-NEVER-APPEAR", "msgs": 3}], "totals": {"group_rooms_active": 2, "dm_rooms_active": 1, "msgs_group": 3, "msgs_dm": 1, "thread_msgs": 1, "rooms_unread_failed": 0, "action_items": 2, "blocked_items": 1}, "pipeline": {}, "stage_changes": [], "open_questions": [], "reporters": [], "coverage": "SHOULD-NEVER-APPEAR", "weekend": true, "recon_done": true}

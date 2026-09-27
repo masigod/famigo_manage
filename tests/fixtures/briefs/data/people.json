@@ -1,7 +1,17 @@
 {
-  "p_alpha": {"L1": {"name": "Alpha Kim", "role": "운영 매니저", "team": "실무팀", "aliases": ["Alpha"]},
-              "L2": {"pattern": "SHOULD-NEVER-APPEAR-L2"}, "L3": {"temperament": "SHOULD-NEVER-APPEAR-L3"}},
-  "p_bravo": {"L1": {"name": "Bravo Lee", "role": "개발", "team": "개발"}},
-  "p_charlie": {"L1": {"name": "찰리", "role": "콘텐츠", "team": "마케팅"}},
-  "p_delta": {"L1": {"name": "Delta Park", "role": "리서치", "team": "실무팀", "active": false}}
+  "_LOCAL_ONLY": true,
+  "갱신": "2026-09-27",
+  "설명": "L1 활동 통계 · L2 패턴 · L3 추론 (합성 픽스처)",
+  "people": {
+    "Alpha Kim": {
+      "L1": {"msgs": 120, "days": 40, "rooms": 6, "thread_pct": 30, "avg_chars": 80, "reports": 22, "files": 3,
+             "question_pct": 10, "late_pct": 2, "peak_hours": [10, 14, 19], "first": "2026-03-02", "last": "2026-09-23",
+             "top_rooms": ["일일업무"], "by_month": {"2026-09": 30}},
+      "패턴": ["SHOULD-NEVER-APPEAR-L2"],
+      "성격추론": ["SHOULD-NEVER-APPEAR-L3"]
+    },
+    "Bravo Lee": {"L1": {"msgs": 60, "days": 20, "rooms": 3, "reports": 9, "last": "2026-09-22"}, "패턴": ["x"], "성격추론": ["y"]},
+    "찰리": {"L1": {"msgs": 10, "days": 5, "rooms": 2, "reports": 0, "last": "2026-09-10"}, "패턴": ["x"], "성격추론": ["y"]},
+    "Delta Park": {"L1": {"msgs": 1, "days": 1, "rooms": 1, "reports": 0, "last": "2026-05-01", "active": false}, "패턴": [], "성격추론": []}
+  }
 }

@@ -9,6 +9,7 @@
 # 띄우는 것 (launchd, 로그인하면 자동 시작 · 죽으면 재시작):
 #   life.famigo.office.deskrpg   DeskRPG 3D 사무실         http://localhost:3000
 #   life.famigo.office.gateway   famigo Lark 게이트웨이    127.0.0.1:8642 (항상 로컬 전용)
+#                                + 관리자 웹              http://127.0.0.1:3101 (퇴장·복귀·표시 이름·직무·외형)
 #   life.famigo.office.sync      07:45·13:45 Lark 명단 수집 → office.json → 사무실 배치
 set -euo pipefail
 
@@ -40,6 +41,8 @@ status() {
   done
   curl -fsS -o /dev/null http://127.0.0.1:8642/health && ok "게이트웨이 응답" || echo "✗ 게이트웨이 무응답"
   curl -fsS -o /dev/null http://127.0.0.1:3000/auth && ok "DeskRPG 응답" || echo "✗ DeskRPG 무응답"
+  code=$(curl -s -o /dev/null -w "%{http_code}" http://127.0.0.1:3101/ || true)
+  [[ "$code" == "401" ]] && ok "관리자 웹 응답 (http://127.0.0.1:3101)" || echo "✗ 관리자 웹 무응답 ($code)"
   [[ -f "$ROOT/out/office.json" ]] && echo "  office.json 기준: $(python3 -c "import json;print(json.load(open('$ROOT/out/office.json'))['generated_at'])")"
   echo "  로그: $LOGS"
 }
@@ -129,8 +132,8 @@ write_plist life.famigo.office.deskrpg \
   "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>"
 
 write_plist life.famigo.office.gateway \
-  "<string>$NODE</string><string>$ROOT/gateway/server.mjs</string><string>--office</string><string>$ROOT/out/office.json</string><string>--host</string><string>127.0.0.1</string><string>--port</string><string>8642</string>" \
-  "$(xml_env PATH "$PATH_FOR_AGENTS" FAMIGO_GATEWAY_TOKEN "$FAMIGO_GATEWAY_TOKEN")" \
+  "<string>$NODE</string><string>$ROOT/gateway/server.mjs</string><string>--office</string><string>$ROOT/out/office.json</string><string>--host</string><string>127.0.0.1</string><string>--port</string><string>8642</string><string>--admin-port</string><string>3101</string>" \
+  "$(xml_env PATH "$PATH_FOR_AGENTS" FAMIGO_GATEWAY_TOKEN "$FAMIGO_GATEWAY_TOKEN" FAMIGO_DESK_PASSWORD "$FAMIGO_DESK_PASSWORD" FAMIGO_DATA_DIR "$DATA_DIR" DESKRPG_URL http://127.0.0.1:3000)" \
   "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>"
 
 write_plist life.famigo.office.sync \
@@ -162,4 +165,5 @@ if (( LAN )); then
   ip=$(ipconfig getifaddr en0 2>/dev/null || true)
   echo "  팀원:   http://${ip:-<이 Mac 의 IP>}:3000  — 같은 네트워크에서. 각자 가입 후 사무실 비밀번호로 입장"
 fi
+echo "  관리:   http://127.0.0.1:3101   (아이디 admin · 비밀번호는 위와 같음) — 퇴장·복귀·표시 이름·직무·외형"
 echo "  상태:   bash scripts/install-mac.sh --status"

@@ -30,6 +30,11 @@ function memberReply(member, office) {
   );
   const who = [member.role, member.team].filter(Boolean).join(" · ");
   const out = [`${member.display_name}${who ? ` (${who})` : ""}입니다.`];
+  const activity = [
+    member.last_active ? `최근 Lark 발화 ${member.last_active}` : null,
+    member.reports !== null && member.reports !== undefined ? `일일보고 누적 ${member.reports}회` : null,
+  ].filter(Boolean);
+  if (activity.length) out.push(activity.join(" · "));
   if (mine.length) {
     out.push("", `**Lark 장부에서 제 이름이 걸린 열린 항목 ${mine.length}건**`, "");
     out.push(...mine.slice(0, 5).map(line));
@@ -86,9 +91,11 @@ function hygiene(office) {
 function header(office) {
   const d = office.daily;
   if (!d) return `기준 ${office.generated_at} · 일일 수집 기록 없음(미확인)`;
-  const swept = d.rooms_swept ?? "미확인";
-  const failed = d.rooms_failed ?? "미확인";
-  return `기준 ${office.generated_at} · 최근 수집 ${d.date ?? "날짜 미기록"} · 방 ${swept} · 실패 ${failed}`;
+  const v = (x) => (x === null || x === undefined ? "미확인" : x);
+  const failed = d.rooms_unread_failed ?? d.rooms_failed;
+  const active = d.group_rooms_active ?? d.rooms_swept;
+  const msgs = d.msgs_group;
+  return `기준 ${office.generated_at} · 최근 수집 ${d.date ?? "날짜 미기록"} · 활동 방 ${v(active)} · 그룹 발화 ${v(msgs)} · 읽지 못함 ${v(failed)}`;
 }
 
 function analystReply(text, office) {
@@ -99,7 +106,7 @@ function analystReply(text, office) {
   else out.push(...decisions(office));
   out.push(
     "",
-    `_※ Lark ${office.daily?.rooms_swept ?? office.counts.rooms}방 밖(구두·전화·메일·외부 그룹)은 이 데이터에 없습니다. '없음'이 아니라 '이 창에 없음'입니다._`,
+    `_※ Lark ${office.counts.rooms}방 밖(구두·전화·메일·외부 그룹)은 이 데이터에 없습니다. '없음'이 아니라 '이 창에 없음'입니다._`,
   );
   return out.join("\n");
 }

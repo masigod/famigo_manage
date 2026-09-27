@@ -20,6 +20,8 @@ import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createOfficeSource, renderBoard, cardsFor } from "./office-model.mjs";
 import { composeReply } from "./replies.mjs";
+import { fileURLToPath } from "node:url";
+import { createAdmin, shellSync } from "../admin/server.mjs";
 
 export const PLUGIN_VERSION = "0.6.0";
 const PIPELINE_RE = /파이프라인|pipeline/i;
@@ -254,6 +256,7 @@ function main() {
       host: { type: "string", default: "127.0.0.1" },
       port: { type: "string", default: "8642" },
       state: { type: "string" },
+      "admin-port": { type: "string" },
     },
   });
   const officePath = resolve(values.office);
@@ -262,6 +265,14 @@ function main() {
   server.listen(Number(values.port), values.host, () => {
     console.log(`[famigo-gateway] http://${values.host}:${values.port} · office ${officePath}`);
   });
+  if (values["admin-port"]) {
+    // 관리자 웹은 설정을 바꾸는 창구라 LAN 설정과 무관하게 항상 이 Mac 에서만 연다.
+    const root = fileURLToPath(new URL("..", import.meta.url));
+    const admin = createAdmin({ root, password: process.env.FAMIGO_DESK_PASSWORD, runSync: shellSync(root) });
+    admin.listen(Number(values["admin-port"]), "127.0.0.1", () => {
+      console.log(`[famigo-admin] http://127.0.0.1:${values["admin-port"]} (admin / FAMIGO_DESK_PASSWORD)`);
+    });
+  }
 }
 
 if (import.meta.url === `file://${process.argv[1]}`) main();

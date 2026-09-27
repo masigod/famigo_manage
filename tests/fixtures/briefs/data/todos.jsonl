@@ -1,7 +1,7 @@
-{"id": "T001", "title": "가상 리워드 금액 확정", "kind": "decision", "status": "open", "opened": "2026-08-29", "room": "진행중 - 가상 캠페인 A", "owner": "Alpha"}
-{"id": "T002", "title": "가상 방 접두사 정리", "kind": "hygiene", "status": "open", "opened": "2026-09-25"}
-{"id": "T003", "title": "가상 로그인 전환", "kind": "work", "status": "open", "opened": "2026-09-10", "owner": "Bravo Lee"}
+{"id": "T001", "opened": "2026-08-29", "kind": "decision", "who": "Alpha Kim", "title": "가상 리워드 금액 확정", "detail": "SHOULD-NOT-COPY-DETAIL", "room": "진행중 - 가상 캠페인 A", "campaign": "가상 캠페인 A", "due": "2026-09-30", "status": "open", "days_open": 29, "source": "raw"}
+{"id": "T002", "opened": "2026-09-25", "kind": "hygiene", "title": "가상 방 접두사 정리", "status": "open", "days_open": 2}
+{"id": "T003", "opened": "2026-09-10", "kind": "work", "who": "Bravo Lee", "title": "가상 로그인 전환", "status": "open", "days_open": 17}
 {"id": "T002", "status": "resolved"}
-{"id": "T004", "title": "가상 외부 회신 대기", "kind": "blocked", "status": "blocked", "opened": "2026-09-20"}
-{"id": "T005", "title": "가상 판정 오류", "kind": "signal", "status": "closed_wrong", "opened": "2026-09-01"}
+{"id": "T004", "opened": "2026-09-20", "kind": "blocked", "title": "가상 외부 회신 대기", "status": "blocked", "days_open": 7}
+{"id": "T005", "opened": "2026-09-01", "kind": "signal", "title": "가상 판정 오류", "status": "closed_wrong", "days_open": 26}
 {"id": "T006", "title": "봇 방 항목", "status": "open", "room": "알림 봇"}

@@ -59,7 +59,7 @@ case "${1:-}" in
     ;;
   gateway)
     ensure_env
-    exec node gateway/server.mjs --office out/office.json --host 127.0.0.1 --port "$GW_PORT"
+    exec node gateway/server.mjs --office out/office.json --host 127.0.0.1 --port "$GW_PORT" --admin-port "${FAMIGO_ADMIN_PORT:-3101}"
     ;;
   seed)
     ensure_env

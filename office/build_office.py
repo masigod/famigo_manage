@@ -60,6 +60,7 @@ TODO_FIELDS = {
     "room": ["room", "room_name", "room_slug", "source_room", "chat"],
     "owner": ["owner", "assignee", "who", "person", "담당"],
     "campaign": ["campaign", "campaign_name", "project"],
+    "due": ["due", "deadline"],
 }
 PERSON_L1_FIELDS = {
     "name": ["display_name", "name", "nickname", "alias"],
@@ -67,6 +68,8 @@ PERSON_L1_FIELDS = {
     "team": ["team", "department", "dept", "area", "팀"],
     "aliases": ["aliases", "alias_names", "names"],
     "active": ["active", "is_active", "employed"],
+    "last_active": ["last", "last_seen", "last_active"],
+    "reports": ["reports", "report_count"],
 }
 ROOM_FIELDS = {
     "id": ["chat_id", "id", "room_id"],
@@ -74,11 +77,19 @@ ROOM_FIELDS = {
     "external": ["external", "is_external", "외부"],
     "last_human": ["last_human_at", "last_human", "last_seen", "last_activity", "last_message_at"],
     "kind": ["kind", "type", "chat_type"],
+    "campaign": ["campaign", "campaign_name"],
 }
 CAMPAIGN_FIELDS = {
     "name": ["name", "campaign", "title"],
     "room": ["room", "room_name", "chat_id"],
     "owner": ["owner", "lead", "manager", "담당"],
+    "owners": ["owners"],
+    "status": ["status"],
+    "idle_days": ["idle_days"],
+    "launch": ["launch", "start"],
+    "end": ["end"],
+    "seen_in": ["seen_in", "rooms"],
+    "wbs": ["wbs"],
 }
 DAILY_FIELDS_SCALAR = re.compile(r"^[a-z_]+$")
 
@@ -137,8 +148,9 @@ def as_records(obj, id_key: str = "_key") -> list[dict]:
     if isinstance(obj, list):
         return [r for r in obj if isinstance(r, dict)]
     if isinstance(obj, dict):
+        # 실측(2026-09-28): 레코드가 래퍼 키 아래에 있고 옆에 `_schema`·`_manual` 같은 메타 키가 여럿 붙는다.
         for wrapper in ("items", "people", "rooms", "campaigns", "data"):
-            if isinstance(obj.get(wrapper), (list, dict)) and len(obj) <= 3:
+            if isinstance(obj.get(wrapper), (list, dict)):
                 return as_records(obj[wrapper], id_key)
         out = []
         for k, v in obj.items():
@@ -208,6 +220,8 @@ def load_people(data_dir: Path, hits: dict) -> list[dict]:
                 "team": _str(pick(src, PERSON_L1_FIELDS["team"], hits, "person.team")),
                 "aliases": [a for a in aliases if isinstance(a, str)] if isinstance(aliases, list) else [],
                 "active": active if isinstance(active, bool) else None,
+                "last_active": _str(pick(src, PERSON_L1_FIELDS["last_active"], hits, "person.last_active")),
+                "reports": _int(pick(src, PERSON_L1_FIELDS["reports"], hits, "person.reports")),
             }
         )
     return people
@@ -228,6 +242,7 @@ def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dic
                 "kind": _str(pick(rec, ROOM_FIELDS["kind"], hits, "room.kind")) or "",
                 "external": pick(rec, ROOM_FIELDS["external"], hits, "room.external"),
                 "last": parse_time(pick(rec, ROOM_FIELDS["last_human"], hits, "room.last_human")),
+                "campaign": _str(pick(rec, ROOM_FIELDS["campaign"], hits, "room.campaign")),
             }
         )
     by_id = {r["id"]: r for r in local if r["id"]}
@@ -248,7 +263,7 @@ def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dic
             match = by_id.get(a.get("chat_id")) or by_name.get(name) or by_name.get(title) or {}
             source.append(
                 {"id": a.get("chat_id") or name, "name": name, "kind": match.get("kind", ""),
-                 "external": a.get("external"), "last": match.get("last")}
+                 "external": a.get("external"), "last": match.get("last"), "campaign": match.get("campaign")}
             )
     else:
         source = [dict(r, id=r["id"] or r["name"]) for r in local]
@@ -268,6 +283,7 @@ def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dic
                 "stage_note": m.group(2).strip("()") if m and m.group(2) else None,
                 "external": bool(r["external"]) if r["external"] is not None else False,
                 "quiet_days": days_between(r["last"], now),  # None = 미확인. 0 과 다르다.
+                "campaign": r.get("campaign"),
             }
         )
     return rooms
@@ -304,21 +320,43 @@ def load_todos(data_dir: Path, now: dt.datetime, hits: dict) -> list[dict]:
                 "room": room,
                 "owner": _str(pick(row, TODO_FIELDS["owner"], hits, "todo.owner")),
                 "campaign": _str(pick(row, TODO_FIELDS["campaign"], hits, "todo.campaign")),
+                "due": _str(pick(row, TODO_FIELDS["due"], hits, "todo.due")),
             }
         )
     return todos
 
 
-def load_campaign_owners(data_dir: Path, hits: dict) -> dict[str, str]:
-    owners = {}
-    for rec in as_records(read_json(data_dir / "campaigns.json")):
+def load_campaigns(data_dir: Path, hits: dict) -> list[dict]:
+    """campaigns.json — 사람이 `_manual.exclude` 로 뺀 것(오탐)은 캠페인이 아니다.
+    WBS 는 **건수와 마지막 날짜만** 옮긴다: 원문 줄 노출은 T079 에서 Dylan 판단 대기다."""
+    raw = read_json(data_dir / "campaigns.json")
+    manual = raw.get("_manual", {}) if isinstance(raw, dict) else {}
+    excluded = set(manual.get("exclude") or []) if isinstance(manual, dict) else set()
+    out = []
+    for rec in as_records(raw):
         name = _str(pick(rec, CAMPAIGN_FIELDS["name"], hits, "campaign.name") or rec.get("_key"))
+        if not name or name in excluded:
+            continue
+        owners = pick(rec, CAMPAIGN_FIELDS["owners"], hits, "campaign.owners")
         owner = _str(pick(rec, CAMPAIGN_FIELDS["owner"], hits, "campaign.owner"))
-        room = _str(pick(rec, CAMPAIGN_FIELDS["room"], hits, "campaign.room"))
-        if owner:
-            for key in filter(None, (name, room)):
-                owners[key] = owner
-    return owners
+        wbs = pick(rec, CAMPAIGN_FIELDS["wbs"], hits, "campaign.wbs")
+        wbs = [w for w in wbs if isinstance(w, dict)] if isinstance(wbs, list) else []
+        seen = pick(rec, CAMPAIGN_FIELDS["seen_in"], hits, "campaign.seen_in")
+        out.append(
+            {
+                "name": name,
+                "owners": [o for o in ([owner] if owner else []) + (owners if isinstance(owners, list) else []) if isinstance(o, str)],
+                "status": _str(pick(rec, CAMPAIGN_FIELDS["status"], hits, "campaign.status")),
+                "idle_days": _int(pick(rec, CAMPAIGN_FIELDS["idle_days"], hits, "campaign.idle_days")),
+                "launch": _str(pick(rec, CAMPAIGN_FIELDS["launch"], hits, "campaign.launch")),
+                "end": _str(pick(rec, CAMPAIGN_FIELDS["end"], hits, "campaign.end")),
+                "wbs_count": len(wbs),
+                "wbs_last": max((_str(w.get("d")) or "" for w in wbs), default="") or None,
+                "rooms": [x for x in seen if isinstance(x, str)] if isinstance(seen, list) else [],
+                "room": _str(pick(rec, CAMPAIGN_FIELDS["room"], hits, "campaign.room")),
+            }
+        )
+    return out
 
 
 def load_daily(data_dir: Path) -> dict | None:
@@ -335,6 +373,12 @@ def load_daily(data_dir: Path) -> dict | None:
             out[k] = v
         elif k in {"date", "status", "window", "generated_at"} and isinstance(v, str):
             out[k] = v
+    # 실측: 집계는 `totals` 아래 수치다. 수치만 올린다.
+    totals = last.get("totals")
+    if isinstance(totals, dict):
+        for k, v in totals.items():
+            if DAILY_FIELDS_SCALAR.match(k) and isinstance(v, (int, float)) and not isinstance(v, bool):
+                out.setdefault(k, v)
     return out
 
 
@@ -361,11 +405,12 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
     people = load_people(data_dir, hits)
     rooms = load_rooms(data_dir, now, hits, (roster or {}).get("rooms"))
     todos = load_todos(data_dir, now, hits)
-    campaign_owners = load_campaign_owners(data_dir, hits)
+    campaigns = load_campaigns(data_dir, hits)
     daily = load_daily(data_dir)
 
     member_cfg: dict = config.get("members", {})
-    exclude = set(config.get("exclude", []))
+    # 관리자 웹의 '퇴장'은 exclude 에 이름을 적는 것이다. include:false 도 같은 뜻.
+    exclude = set(config.get("exclude", [])) | {n for n, c in member_cfg.items() if c.get("include") is False}
     used: set[str] = set()
     members = []
 
@@ -402,6 +447,8 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
                 "look": cfg.get("look"),
                 "aliases": sorted({name, p["name"], *p["aliases"], *cfg.get("aliases", [])}),
                 "rooms": r["rooms"] if r else [],
+                "last_active": p.get("last_active"),
+                "reports": p.get("reports"),
                 "kind": "member",
             }
         )
@@ -440,9 +487,21 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
                 and t["age_days"] is not None
                 and t["age_days"] >= STALE_DAYS,
                 "room": t["room"],
+                "due": t.get("due"),
                 "assignee": owner_key(t["owner"]),
             }
         )
+
+    def campaign_of(room: dict) -> dict | None:
+        """방 ↔ 캠페인: rooms.json 의 campaign 필드 → 캠페인의 방 기록 → 이름 일치 순. 못 찾으면 None(추측 안 함)."""
+        keys = {room["name"], room["title"], room["id"]}
+        for c in campaigns:
+            if room.get("campaign") and c["name"] == room["campaign"]:
+                return c
+        for c in campaigns:
+            if (c["room"] and c["room"] in keys) or keys & set(c["rooms"]):
+                return c
+        return next((c for c in campaigns if c["name"] == room["title"]), None)
 
     pipeline, hygiene = [], []
     for r in rooms:
@@ -450,7 +509,8 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
             continue  # 상시 운영방·접두사 없는 방은 파이프라인이 아니다 (집계는 counts 에)
         status = STAGE_TO_STATUS.get(r["stage"]) or STAGE_TO_STATUS[r["stage"].lower()]
         zombie = r["stage"] in {"진행중", "준비중"} and r["quiet_days"] is not None and r["quiet_days"] >= ZOMBIE_DAYS
-        owner = campaign_owners.get(r["title"]) or campaign_owners.get(r["name"]) or campaign_owners.get(r["id"])
+        c = campaign_of(r)
+        owner = next((k for k in map(owner_key, c["owners"]) if k), None) if c else None
         pipeline.append(
             {
                 "id": r["id"],
@@ -461,7 +521,12 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
                 "quiet_days": r["quiet_days"],
                 "zombie": zombie,
                 "external": r["external"],
-                "assignee": owner_key(owner),
+                "assignee": owner,
+                "campaign": (
+                    {k: c[k] for k in ("name", "status", "launch", "end", "idle_days", "wbs_count", "wbs_last")}
+                    if c
+                    else None
+                ),
             }
         )
         if zombie:
@@ -476,6 +541,8 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
         "todos_open": sum(1 for t in ledger if t["status"] in {"todo", "review", "blocked"}),
         "todos_stale": sum(1 for t in ledger if t["stale"]),
         "members": sum(1 for m in members if m["kind"] == "member"),
+        "campaigns": len(campaigns),
+        "pipeline_linked": sum(1 for x in pipeline if x["campaign"]),
     }
 
     office = {
@@ -490,6 +557,12 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
         "hygiene": sorted(hygiene, key=lambda h: -(h["quiet_days"] or 0)),
         "daily": daily,
         "counts": counts,
+        "excluded": sorted(exclude),
+        # 시더가 '관리자가 퇴장시킨 NPC' 를 알아보는 키 — 직원 키와 같은 규칙으로 만든다.
+        "excluded_keys": sorted(
+            {member_cfg.get(n, {}).get("profile") or profile_slug(n, set()) for n in exclude}
+            | set(config.get("retire_keys", []))  # 관리자 웹에서 확정한 '퇴장 후보'
+        ),
     }
     report = {
         "files": {
@@ -534,6 +607,10 @@ def apply_gate(office: dict, gate) -> dict:
     if not isinstance(gated, dict) or "members" not in gated or "boards" not in gated:
         raise SourceError("export_for_slack() 반환 형태가 오피스 모델이 아니다 — 게이트 계약 확인 필요")
     return gated
+
+
+def _int(v) -> int | None:
+    return int(v) if isinstance(v, (int, float)) and not isinstance(v, bool) else None
 
 
 def _str(v) -> str | None:

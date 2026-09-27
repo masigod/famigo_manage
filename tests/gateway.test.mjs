@@ -126,6 +126,13 @@ test("외형: 설정값 우선, 나머지는 겹치지 않게 고정 배정", ()
   assert.equal(new Set(looks).size, looks.length);
   for (const l of looks) assert.ok(OFFICE_LOOK_IDS.includes(l));
   assert.deepEqual(assignLooks(members), assignLooks(members)); // 결정적
+  // 회귀: 한 사람의 외형을 설정해도 이미 앉은 사람들의 외형은 그대로다
+  const seated = assignLooks([{ key: "p" }, { key: "q" }, { key: "r" }]);
+  const current = new Map(seated.map((m) => [m.key, m.look]));
+  const after = assignLooks([{ key: "p", look: "office-garam" }, { key: "q" }, { key: "r" }], current);
+  assert.equal(after[1].look, seated[1].look);
+  assert.equal(after[2].look, seated[2].look);
+  assert.equal(after[0].look, "office-garam");
   assert.deepEqual(appearance("office-seo"), { officeLookId: "office-seo", bodyType: "female" });
 });
 
@@ -136,12 +143,20 @@ test("시더는 이름이 지워진 모델을 받으면 이유를 말하고 멈�
   assert.doesNotThrow(() => validateOffice({ ...office, members: [{ key: "a", display_name: "A" }] }));
 });
 
-test("퇴장: 조금 사라지면 정리, 한꺼번에 절반 넘게면 멈춘다", async () => {
-  const { retirePlan } = await import("../seed/seed.mjs");
-  assert.equal(retirePlan(10, 0).retire, false);
-  assert.equal(retirePlan(10, 2).retire, true);
-  assert.equal(retirePlan(4, 3).retire, true); // 소수는 절반을 넘어도 정리 (3명 이하)
-  assert.equal(retirePlan(10, 6).retire, false);
-  assert.match(retirePlan(10, 6).reason, /FAMIGO_ALLOW_MASS_RETIRE=1/);
-  assert.equal(retirePlan(10, 6, true).retire, true);
+test("퇴장은 사람이 정한다: 관리자 퇴장·플레이어만 지우고, Lark 에서 사라진 사람은 후보로", async () => {
+  const { classifyProfiles } = await import("../seed/seed.mjs");
+  const profiles = [
+    { id: "1", profileName: "alpha", displayName: "Alpha" },
+    { id: "2", profileName: "gone", displayName: "Gone" },
+    { id: "3", profileName: "help", displayName: "help" },
+    { id: "4", profileName: "dylan", displayName: "Dylan" },
+  ];
+  const { retire, departed } = classifyProfiles(
+    profiles,
+    new Set(["alpha"]),
+    new Set(["help"]),
+    (p) => p.displayName.toLowerCase() === "dylan",
+  );
+  assert.deepEqual(retire.map((r) => [r.profile.profileName, r.why]), [["help", "관리자 퇴장"], ["dylan", "플레이어 본인"]]);
+  assert.deepEqual(departed.map((p) => p.profileName), ["gone"]);
 });

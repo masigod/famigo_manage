@@ -139,12 +139,16 @@ class MergeTest(unittest.TestCase):
     def test_roster_is_the_member_truth(self):
         roster, _ = RosterTest().roster()
         data = ROOT / "tests" / "fixtures" / "briefs" / "data"
-        office, report = build_office.build_office(data, {}, NOW, roster)
+        # people.json L1 은 활동 통계뿐이다(실측) — 직무는 관리자 웹(config)에서만 온다
+        config = {"members": {"Alpha Kim": {"role": "운영 매니저"}}}
+        office, report = build_office.build_office(data, config, NOW, roster)
         members = {m["display_name"]: m for m in office["members"] if m["kind"] == "member"}
         # Lark 에 있는 사람 전원 — people.json 에 없는 새 직원도
         self.assertEqual(set(members), {"Alpha Kim", "새 직원", "Bravo Lee"})
         # 직무는 people.json 과 이름이 맞을 때만
         self.assertEqual(members["Alpha Kim"]["role"], "운영 매니저")
+        self.assertEqual(members["Alpha Kim"]["last_active"], "2026-09-23")  # L1 통계는 쓴다
+        self.assertEqual(members["Alpha Kim"]["reports"], 22)
         self.assertIsNone(members["새 직원"]["role"])
         # Lark 에 없는 people.json 인물(찰리)은 직원이 아니다
         self.assertNotIn("찰리", members)
@@ -154,7 +158,7 @@ class MergeTest(unittest.TestCase):
         self.assertEqual(t001["assignee"], members["Alpha Kim"]["key"])
         self.assertRegex(members["새 직원"]["key"], r"^m-[0-9a-f]{8}$")
         # 명단이 있든 없든 같은 사람은 같은 키 — 소스가 바뀌어도 NPC 가 중복되지 않는다
-        plain, _ = build_office.build_office(data, {}, NOW, None)
+        plain, _ = build_office.build_office(data, config, NOW, None)
         plain_keys = {m["display_name"]: m["key"] for m in plain["members"]}
         self.assertEqual(members["Alpha Kim"]["key"], plain_keys["Alpha Kim"])
 
