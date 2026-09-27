@@ -118,16 +118,18 @@ def build_roster(client: LarkClient, now: dt.datetime) -> dict:
     seen_chats = 0
     people: dict[str, dict] = {}
     tenants = collections.Counter()
+    rooms = []  # 방 레지스트리 — 이름 접두사가 캠페인 상태다 (§3.2). 원천(API)에서 동기화.
     for chat in client.chats():
         name = (chat.get("name") or "").strip()
         if BOT_ROOM_RE.search(name):
             skipped["bot"] += 1
             continue
-        if chat.get("external"):
-            skipped["external"] += 1
-            continue
         if chat.get("chat_status") not in (None, "normal"):
             skipped["not_normal"] += 1
+            continue
+        rooms.append({"chat_id": chat.get("chat_id"), "name": name, "external": bool(chat.get("external"))})
+        if chat.get("external"):
+            skipped["external"] += 1  # 외부 방은 이름까지만 — 구성원은 보지 않는다 (§0.4)
             continue
         seen_chats += 1
         title = name[STAGE_RE.match(name).end():].strip() if STAGE_RE.match(name) else name
@@ -157,6 +159,7 @@ def build_roster(client: LarkClient, now: dt.datetime) -> dict:
         "chats_seen": seen_chats,
         "chats_skipped": dict(skipped),
         "members": members,
+        "rooms": rooms,
     }
 
 

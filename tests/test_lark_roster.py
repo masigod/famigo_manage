@@ -92,8 +92,17 @@ class RosterTest(unittest.TestCase):
     def test_bot_external_dissolved_and_foreign_excluded(self):
         roster, _ = self.roster()
         raw = json.dumps(roster, ensure_ascii=False)
-        for name in ("봇방사람", "외부 담당자", "게스트", "외부 협업방", "해산된 방"):
+        for name in ("봇방사람", "외부 담당자", "게스트", "알림 봇", "해산된 방"):
             self.assertNotIn(name, raw)
+        # 외부 방은 이름까지만 (§0.4) — 방 목록엔 있고 구성원은 안 본다
+        self.assertEqual(
+            roster["rooms"],
+            [
+                {"chat_id": "oc_a", "name": "일일업무", "external": False},
+                {"chat_id": "oc_b", "name": "진행중 - 가상 캠페인 A", "external": False},
+                {"chat_id": "oc_ext", "name": "외부 협업방", "external": True},
+            ],
+        )
         self.assertEqual(roster["chats_skipped"], {"bot": 1, "external": 1, "not_normal": 1, "foreign_member": 1})
 
     def test_open_id_and_secret_never_stored(self):
@@ -148,6 +157,28 @@ class MergeTest(unittest.TestCase):
         plain, _ = build_office.build_office(data, {}, NOW, None)
         plain_keys = {m["display_name"]: m["key"] for m in plain["members"]}
         self.assertEqual(members["Alpha Kim"]["key"], plain_keys["Alpha Kim"])
+
+    def test_api_room_names_are_stage_truth(self):
+        # rooms.json 이름이 접두사를 안 들고 있어도, API 이름으로 상태를 읽고 조용한 기간은 chat_id 로 잇는다
+        with tempfile.TemporaryDirectory() as d:
+            data = Path(d)
+            (data / "rooms.json").write_text(json.dumps([
+                {"chat_id": "oc_1", "title": "캠페인 X", "last_human_at": "2026-08-01T10:00:00+09:00"},
+                {"chat_id": "oc_2", "title": "캠페인 Y"},
+            ], ensure_ascii=False))
+            api = [
+                {"chat_id": "oc_1", "name": "진행중 - 캠페인 X", "external": False},
+                {"chat_id": "oc_2", "name": "Cancel - 캠페인 Y", "external": False},
+                {"chat_id": "oc_3", "name": "알림 봇", "external": False},
+            ]
+            rooms = build_office.load_rooms(data, NOW, {}, api)
+            by = {r["title"]: r for r in rooms}
+            self.assertEqual(set(by), {"캠페인 X", "캠페인 Y"})
+            self.assertEqual(by["캠페인 X"]["stage"], "진행중")
+            self.assertEqual(by["캠페인 X"]["quiet_days"], 57)
+            self.assertIsNone(by["캠페인 Y"]["quiet_days"])  # 모르면 미확인
+            # API 목록이 없으면 rooms.json 만 — 이 모양에선 상태를 못 읽는다(0 이 아니라 접두사 없음)
+            self.assertTrue(all(r["stage"] is None for r in build_office.load_rooms(data, NOW, {}, None)))
 
     def test_failed_collection_does_not_overwrite(self):
         with tempfile.TemporaryDirectory() as d:

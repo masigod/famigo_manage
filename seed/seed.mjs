@@ -142,7 +142,12 @@ export async function seed({
   const { profiles: listed } = await api.request("GET", `/api/gateways/${gid}/profiles`);
   const profiles = Array.isArray(listed) ? listed : [];
   const byName = new Map(profiles.map((p) => [p.profileName ?? p.profile_name, p]));
-  for (const m of assignLooks(office.members)) {
+  // 플레이어 본인은 아바타로 이미 사무실에 있다 — NPC 로 한 번 더 두지 않는다.
+  const isPlayer = (m) =>
+    [m.display_name, ...(m.aliases ?? [])].some((n) => n?.toLowerCase() === account.nickname.toLowerCase());
+  const members = office.members.filter((m) => m.kind !== "member" || !isPlayer(m));
+  if (members.length < office.members.length) log(`플레이어 본인(${account.nickname})은 NPC 로 두지 않음`);
+  for (const m of assignLooks(members)) {
     let p = byName.get(m.key);
     if (!p) {
       ({ profile: p } = await api.request("POST", `/api/gateways/${gid}/profiles`, {
@@ -159,13 +164,15 @@ export async function seed({
   }
 
   // 3-1. Lark 에서 사라진 직원은 퇴장 — 이 게이트웨이의 프로필만 본다. Lark 가 정본이다.
-  const keep = new Set(office.members.map((m) => m.key));
+  const keep = new Set(members.map((m) => m.key));
   const gone = profiles.filter((p) => !keep.has(p.profileName ?? p.profile_name));
   const { retire, reason } = retirePlan(profiles.length, gone.length, allowMassRetire);
   if (!retire && gone.length) log(`⚠ 퇴장 보류: ${reason}`);
   for (const p of retire ? gone : []) {
     await api.request("DELETE", `/api/gateways/${gid}/profiles/${encodeURIComponent(p.id)}`);
-    log(`퇴장: ${p.displayName ?? p.profileName} (Lark 에 없음)`);
+    const key = p.profileName ?? p.profile_name;
+    const why = office.members.some((m) => m.key === key) ? "플레이어 본인" : "Lark 에 없음";
+    log(`퇴장: ${p.displayName ?? key} (${why})`);
   }
 
   // 4. 사무실

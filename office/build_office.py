@@ -213,31 +213,61 @@ def load_people(data_dir: Path, hits: dict) -> list[dict]:
     return people
 
 
-def load_rooms(data_dir: Path, now: dt.datetime, hits: dict) -> list[dict]:
-    rooms = []
+def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dict] | None = None) -> list[dict]:
+    """방 레지스트리. Lark API 방 목록(api_rooms)이 있으면 **그 이름이 상태의 정본**이고,
+    rooms.json 은 마지막 사람 발화 시각(조용한 기간)을 잇는 데만 쓴다 (chat_id → 이름 순으로 매칭)."""
+    local = []
     for rec in as_records(read_json(data_dir / "rooms.json")):
         name = _str(pick(rec, ROOM_FIELDS["name"], hits, "room.name") or rec.get("_key"))
         if not name:
             continue
-        kind = _str(pick(rec, ROOM_FIELDS["kind"], hits, "room.kind")) or ""
-        if BOT_ROOM_RE.search(name) or kind.lower() in {"p2p", "dm", "bot"} or name.startswith("dm_"):
+        local.append(
+            {
+                "id": _str(pick(rec, ROOM_FIELDS["id"], hits, "room.id")),
+                "name": name,
+                "kind": _str(pick(rec, ROOM_FIELDS["kind"], hits, "room.kind")) or "",
+                "external": pick(rec, ROOM_FIELDS["external"], hits, "room.external"),
+                "last": parse_time(pick(rec, ROOM_FIELDS["last_human"], hits, "room.last_human")),
+            }
+        )
+    by_id = {r["id"]: r for r in local if r["id"]}
+    by_name = {}
+    for r in local:
+        by_name.setdefault(r["name"], r)
+        m = STAGE_RE.match(r["name"])
+        by_name.setdefault(r["name"][m.end():].strip() if m else r["name"], r)
+
+    if api_rooms:
+        source = []
+        for a in api_rooms:
+            name = _str(a.get("name"))
+            if not name:
+                continue
+            m = STAGE_RE.match(name)
+            title = name[m.end():].strip() if m else name
+            match = by_id.get(a.get("chat_id")) or by_name.get(name) or by_name.get(title) or {}
+            source.append(
+                {"id": a.get("chat_id") or name, "name": name, "kind": match.get("kind", ""),
+                 "external": a.get("external"), "last": match.get("last")}
+            )
+    else:
+        source = [dict(r, id=r["id"] or r["name"]) for r in local]
+
+    rooms = []
+    for r in source:
+        name = r["name"]
+        if BOT_ROOM_RE.search(name) or r["kind"].lower() in {"p2p", "dm", "bot"} or name.startswith("dm_"):
             continue  # §0.2 봇 방 · DM 전면 제외
         m = STAGE_RE.match(name)
-        stage = m.group(1) if m else None
-        stage_note = m.group(2).strip("()") if m and m.group(2) else None
-        title = name[m.end():].strip() if m else name
-        external = pick(rec, ROOM_FIELDS["external"], hits, "room.external")
-        last = parse_time(pick(rec, ROOM_FIELDS["last_human"], hits, "room.last_human"))
-        quiet = days_between(last, now)
         rooms.append(
             {
-                "id": _str(pick(rec, ROOM_FIELDS["id"], hits, "room.id")) or name,
+                "id": r["id"],
                 "name": name,
-                "title": title or name,
-                "stage": stage,
-                "stage_note": stage_note,
-                "external": bool(external) if external is not None else False,
-                "quiet_days": quiet,  # None = 미확인. 0 과 다르다.
+                "title": (name[m.end():].strip() if m else name) or name,
+                "stage": m.group(1) if m else None,
+                "stage_note": m.group(2).strip("()") if m and m.group(2) else None,
+                "external": bool(r["external"]) if r["external"] is not None else False,
+                "quiet_days": days_between(r["last"], now),  # None = 미확인. 0 과 다르다.
             }
         )
     return rooms
@@ -329,7 +359,7 @@ def todo_status(todo: dict) -> str:
 def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | None = None) -> tuple[dict, dict]:
     hits: dict[str, set] = {}
     people = load_people(data_dir, hits)
-    rooms = load_rooms(data_dir, now, hits)
+    rooms = load_rooms(data_dir, now, hits, (roster or {}).get("rooms"))
     todos = load_todos(data_dir, now, hits)
     campaign_owners = load_campaign_owners(data_dir, hits)
     daily = load_daily(data_dir)
@@ -439,6 +469,7 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
 
     counts = {
         "rooms": len(rooms),
+        "rooms_with_stage": sum(1 for r in rooms if r["stage"] is not None),
         "rooms_without_stage": sum(1 for r in rooms if r["stage"] is None),
         "rooms_quiet_unknown": sum(1 for r in rooms if r["quiet_days"] is None),
         "todos": len(ledger),
@@ -465,6 +496,7 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
             name: (data_dir / name).exists()
             for name in ("people.json", "rooms.json", "todos.jsonl", "campaigns.json", "lark_daily.jsonl")
         },
+        "rooms_source": "lark-api (roster)" if (roster or {}).get("rooms") else "rooms.json",
         "matched_fields": {k: sorted(v) for k, v in sorted(hits.items())},
         "roster": (
             {
