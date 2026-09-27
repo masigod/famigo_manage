@@ -19,6 +19,11 @@ ENV_FILE="$HOME/.config/famigo/office.env"
 AGENTS="$HOME/Library/LaunchAgents"
 LOGS="$HOME/Library/Logs/famigo-office"
 LABELS=(life.famigo.office.deskrpg life.famigo.office.gateway life.famigo.office.sync)
+# DeskRPG 는 npx 가 아니라 고정 위치에 설치해 직접 띄운다. launchd → npx → CLI → 서버 로 층이 깊으면
+# 종료 신호가 서버까지 안 가서 고아 서버가 3000 포트와 PID 파일을 쥐고 남는다 (2026-09-28 실측).
+DESK_PREFIX="$HOME/.famigo-office/deskrpg"
+DESK_CLI="$DESK_PREFIX/node_modules/deskrpg/bin/deskrpg.js"
+DESK_PIDFILE="$HOME/.deskrpg/deskrpg.pid"
 UID_N="$(id -u)"
 
 die() { echo "✗ $*" >&2; exit 1; }
@@ -69,6 +74,26 @@ access() {
   echo "  비밀번호 보기:  grep -E 'DESK|CHANNEL' $ENV_FILE"
 }
 
+# 남은 DeskRPG 서버 정리 — DeskRPG 것만 죽인다. 다른 프로그램이 3000 을 쓰면 멈추고 알린다.
+stop_stale_deskrpg() {
+  local pids=() pid cmd
+  [[ -f "$DESK_PIDFILE" ]] && pids+=("$(cat "$DESK_PIDFILE" 2>/dev/null)")
+  while read -r pid; do [[ -n "$pid" ]] && pids+=("$pid"); done < <(lsof -nP -t -iTCP:3000 -sTCP:LISTEN 2>/dev/null)
+  for pid in "${pids[@]}"; do
+    [[ "$pid" =~ ^[0-9]+$ ]] || continue
+    cmd=$(ps -p "$pid" -o command= 2>/dev/null) || continue
+    if [[ "$cmd" == *deskrpg* ]]; then   # 고아 서버: …/node_modules/deskrpg/server.js
+      echo "  남은 DeskRPG 프로세스 정리: pid $pid"
+      kill -TERM "$pid" 2>/dev/null || true
+      for _ in $(seq 1 20); do kill -0 "$pid" 2>/dev/null || break; sleep 0.5; done
+      kill -0 "$pid" 2>/dev/null && kill -KILL "$pid" 2>/dev/null || true
+    else
+      die "3000 포트를 DeskRPG 가 아닌 프로그램이 쓰고 있다 (pid $pid: $cmd) — 먼저 정리해야 한다"
+    fi
+  done
+  rm -f "$DESK_PIDFILE"
+}
+
 status() {
   for l in "${LABELS[@]}"; do
     if launchctl print "gui/$UID_N/$l" >/dev/null 2>&1; then
@@ -99,6 +124,7 @@ case "${1:-}" in
   --access) access; exit 0 ;;
   --uninstall)
     unload_all
+    stop_stale_deskrpg
     for l in "${LABELS[@]}"; do rm -f "$AGENTS/$l.plist"; done
     ok "서비스 제거 (데이터 ~/.deskrpg · $ENV_FILE · out/ 는 남겨 둠)"
     exit 0
@@ -110,7 +136,6 @@ LAN=0
 # ── 0. 전제 ─────────────────────────────────────────────────────────────
 [[ "$(uname)" == "Darwin" ]] || die "macOS 전용 스크립트다"
 NODE="$(command -v node)" || die "node 가 없다 (brew install node)"
-NPX="$(command -v npx)"
 PY="$(command -v python3)" || die "python3 가 없다"
 major=$("$NODE" -p 'process.versions.node.split(".")[0]')
 (( major >= 20 )) || die "node 20+ 필요 (현재 $("$NODE" -v))"
@@ -144,9 +169,13 @@ set -a; source "$ENV_FILE"; set +a
   || die "office.json 생성 실패 — 'bash scripts/office.sh doctor' 로 원천 스키마부터 본다"
 
 # ── 3. DeskRPG 런타임 (~/.deskrpg, SQLite) ─────────────────────────────
-if [[ ! -f "$HOME/.deskrpg/data/deskrpg.db" ]]; then
-  "$NPX" -y "deskrpg@$DESKRPG_VERSION" init
+installed=$("$NODE" -p "require('$DESK_PREFIX/node_modules/deskrpg/package.json').version" 2>/dev/null || true)
+if [[ "$installed" != "$DESKRPG_VERSION" ]]; then
+  echo "  DeskRPG $DESKRPG_VERSION 설치 중 ($DESK_PREFIX)"
+  mkdir -p "$DESK_PREFIX"
+  npm install --prefix "$DESK_PREFIX" "deskrpg@$DESKRPG_VERSION" --no-audit --no-fund --loglevel=error
 fi
+[[ -f "$HOME/.deskrpg/data/deskrpg.db" ]] || "$NODE" "$DESK_CLI" init
 ok "DeskRPG 런타임 준비 (v$DESKRPG_VERSION)"
 
 # ── 4. launchd ─────────────────────────────────────────────────────────
@@ -177,7 +206,7 @@ EOF
 }
 
 write_plist life.famigo.office.deskrpg \
-  "<string>$NPX</string><string>-y</string><string>deskrpg@$DESKRPG_VERSION</string><string>start</string><string>-p</string><string>3000</string>" \
+  "<string>$NODE</string><string>$DESK_CLI</string><string>start</string><string>-p</string><string>3000</string>" \
   "$(xml_env PATH "$PATH_FOR_AGENTS" HOSTNAME "$HOSTNAME_BIND" JWT_SECRET "$DESKRPG_JWT_SECRET" COOKIE_SECURE false)" \
   "<key>RunAtLoad</key><true/><key>KeepAlive</key><true/>"
 
@@ -195,17 +224,22 @@ write_plist life.famigo.office.sync \
   </array>"
 
 unload_all
+stop_stale_deskrpg
 for l in "${LABELS[@]}"; do load_one "$l"; done
 ok "launchd 등록 (로그인 시 자동 시작)"
 
 # ── 5. DeskRPG 가 뜨면 첫 배치 ─────────────────────────────────────────
 echo -n "  DeskRPG 기동 대기"
-for _ in $(seq 1 90); do
+for _ in $(seq 1 120); do
   curl -fsS -o /dev/null http://127.0.0.1:3000/auth 2>/dev/null && break
   echo -n "."; sleep 2
 done
 echo
-curl -fsS -o /dev/null http://127.0.0.1:3000/auth || die "DeskRPG 가 안 뜬다 — $LOGS/life.famigo.office.deskrpg.log"
+if ! curl -fsS -o /dev/null http://127.0.0.1:3000/auth; then
+  echo "── DeskRPG 로그 끝부분 ($LOGS/life.famigo.office.deskrpg.log)"
+  tail -40 "$LOGS/life.famigo.office.deskrpg.log" 2>/dev/null | sed 's/^/  /'
+  die "DeskRPG 가 안 뜬다 — 위 로그를 보여 주세요"
+fi
 DESKRPG_URL=http://127.0.0.1:3000 bash "$ROOT/scripts/office.sh" seed
 
 echo
