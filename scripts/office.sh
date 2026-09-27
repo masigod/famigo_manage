@@ -4,6 +4,7 @@
 #   bash scripts/office.sh roster    # Lark API → out/lark_roster.json (지금 Lark 에 있는 구성원 전원)
 #   bash scripts/office.sh build     # Lark 데이터층 + 명단 → out/office.json (반출 게이트 통과)
 #   bash scripts/office.sh doctor    # 원천 스키마 점검만 (어떤 필드가 맞았는지)
+#   bash scripts/office.sh shape     # 원천 파일 구조만 (값 없음 — 채팅에 붙여도 되는 모양)
 #   bash scripts/office.sh gateway   # famigo Lark 게이트웨이 (127.0.0.1:8642)
 #   bash scripts/office.sh seed      # DeskRPG 에 직원·사무실·보드 배치 (멱등)
 #   bash scripts/office.sh sync      # roster → build → seed (launchd 가 하루 두 번 부른다)
@@ -50,6 +51,9 @@ case "${1:-}" in
     bash "$ROOT/scripts/office.sh" build
     bash "$ROOT/scripts/office.sh" seed
     ;;
+  shape)
+    python3 office/shape.py --data-dir "$DATA_DIR"
+    ;;
   doctor)
     python3 office/build_office.py --data-dir "$DATA_DIR" --roster out/lark_roster.json --doctor
     ;;
@@ -63,7 +67,7 @@ case "${1:-}" in
     echo "로그인: famigo-office / \$FAMIGO_DESK_PASSWORD ($ENV_FILE)"
     ;;
   *)
-    sed -n '2,11p' "$0"
+    sed -n '2,12p' "$0"
     exit 1
     ;;
 esac
