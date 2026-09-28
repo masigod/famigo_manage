@@ -30,6 +30,8 @@ import re
 import sys
 from pathlib import Path
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+
 SCHEMA_VERSION = 1
 KST = dt.timezone(dt.timedelta(hours=9))
 
@@ -45,6 +47,10 @@ STAGE_TO_STATUS = {
 }
 ZOMBIE_DAYS = 21  # §5: 진행중·준비중인데 21일 이상 조용
 STALE_DAYS = 7  # §4.5: 7일+ → stale
+# 업무 카드(일일보고 → 사무실 기본 보드). 2026-09-28 Dylan: "실제 업무가 3D 사무실에 녹아들어 실시간으로 무엇을 하는지".
+WORK_REPORT_DAYS = 14  # 이보다 오래된 일일보고는 '지금의 일'이 아니다
+WORK_RUNNING_HOURS = 36  # 이 안의 보고에 적힌 '진행 중'만 running(3D 이름표 '작업 중') — 옛 보고로 계속 일하는 척하지 않는다
+PRESENCE_MINUTES = 30  # 이 안에 Lark 에서 말했으면 '지금 Lark' 카드(running) — 방 이름만, 본문 없음
 
 BOT_ROOM_RE = re.compile(r"봇|chatbot", re.I)
 
@@ -227,9 +233,35 @@ def load_people(data_dir: Path, hits: dict) -> list[dict]:
     return people
 
 
-def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dict] | None = None) -> list[dict]:
+def load_activity(path: Path | None) -> dict[str, dt.datetime]:
+    """lark_live.py 가 Lark 메시지 이벤트에서 남긴 방별 마지막 사람 발화 시각 (chat_id → 시각).
+    본문·발신자는 없다 — 시각과 방 ID 뿐이다."""
+    raw = read_json(path) if path else None
+    rooms = raw.get("rooms") if isinstance(raw, dict) else None
+    out = {}
+    for chat_id, value in (rooms or {}).items():
+        t = parse_time(value)
+        if isinstance(chat_id, str) and t is not None:
+            out[chat_id] = t
+    return out
+
+
+def _latest(*times: dt.datetime | None) -> dt.datetime | None:
+    present = [t for t in times if t is not None]
+    return max(present) if present else None
+
+
+def load_rooms(
+    data_dir: Path,
+    now: dt.datetime,
+    hits: dict,
+    api_rooms: list[dict] | None = None,
+    activity: dict[str, dt.datetime] | None = None,
+) -> list[dict]:
     """방 레지스트리. Lark API 방 목록(api_rooms)이 있으면 **그 이름이 상태의 정본**이고,
-    rooms.json 은 마지막 사람 발화 시각(조용한 기간)을 잇는 데만 쓴다 (chat_id → 이름 순으로 매칭)."""
+    rooms.json 은 마지막 사람 발화 시각(조용한 기간)을 잇는 데만 쓴다 (chat_id → 이름 순으로 매칭).
+    activity(실시간 발화 시각)가 있으면 rooms.json 의 하루 1회 값보다 늦은 쪽을 쓴다."""
+    activity = activity or {}
     local = []
     for rec in as_records(read_json(data_dir / "rooms.json")):
         name = _str(pick(rec, ROOM_FIELDS["name"], hits, "room.name") or rec.get("_key"))
@@ -263,10 +295,12 @@ def load_rooms(data_dir: Path, now: dt.datetime, hits: dict, api_rooms: list[dic
             match = by_id.get(a.get("chat_id")) or by_name.get(name) or by_name.get(title) or {}
             source.append(
                 {"id": a.get("chat_id") or name, "name": name, "kind": match.get("kind", ""),
-                 "external": a.get("external"), "last": match.get("last"), "campaign": match.get("campaign")}
+                 "external": a.get("external"),
+                 "last": _latest(match.get("last"), activity.get(a.get("chat_id") or "")),
+                 "campaign": match.get("campaign")}
             )
     else:
-        source = [dict(r, id=r["id"] or r["name"]) for r in local]
+        source = [dict(r, id=r["id"] or r["name"], last=_latest(r["last"], activity.get(r["id"] or ""))) for r in local]
 
     rooms = []
     for r in source:
@@ -400,10 +434,74 @@ def todo_status(todo: dict) -> str:
     return "todo"
 
 
-def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | None = None) -> tuple[dict, dict]:
+def _naive_kst(ts: str | None) -> dt.datetime | None:
+    t = parse_time(ts)
+    return t.astimezone(KST) if t else None
+
+
+def work_cards(messages: list[dict], owner_key, now: dt.datetime) -> list[dict]:
+    """사람별 최신 일일보고 + 최근 발화 → 업무 카드. owner_key(이름) → 직원 키(사무실에 없으면 None → 뺀다)."""
+    from daily_report import latest_activity, latest_reports  # 같은 폴더 모듈 — build_insights 와 공유
+
+    cards: list[dict] = []
+    for author, r in latest_reports(messages).items():
+        key = owner_key(author)
+        when = _naive_kst(r.get("ts"))
+        if not key or when is None or (now - when).days >= WORK_REPORT_DAYS:
+            continue
+        fresh = (now - when) <= dt.timedelta(hours=WORK_RUNNING_HOURS)
+        seen: set[str] = set()
+
+        def add(section: str, text: str, status: str, priority: str = "normal"):
+            text = text.strip()
+            if not text or text in seen:
+                return
+            seen.add(text)
+            digest = hashlib.sha1(f"{key}|{section}|{text}".encode()).hexdigest()[:10]
+            cards.append({
+                "id": f"W-{digest}", "title": text[:160], "status": status, "section": section, "assignee": key,
+                "author": author, "report_date": r.get("date"), "report_ts": r.get("ts"), "room": r.get("room"),
+                "priority": priority,
+            })
+
+        for t in r["doing"]:
+            add("doing", t, "running" if fresh else "todo")
+        for t in r["blocked"]:
+            add("blocked", t, "blocked", "high")
+        for t in r["support"]:
+            add("support", t, "review", "high")
+        for t in r["actions"]["high"]:
+            add("action", t, "todo", "high")
+        for t in r["next"] + r["actions"]["mid"] + r["actions"]["low"] + r["actions"]["other"]:
+            add("next", t, "todo")
+        for t in r["today"]:
+            add("today", t, "done")
+    for author, a in latest_activity(messages).items():
+        key = owner_key(author)
+        when = _naive_kst(a.get("ts"))
+        if key and when is not None and dt.timedelta(0) <= now - when <= dt.timedelta(minutes=PRESENCE_MINUTES):
+            cards.append({
+                "id": f"P-{key}", "title": f"지금 Lark · {a.get('room') or '?'}", "status": "running", "section": "presence",
+                "assignee": key, "author": author, "report_date": when.date().isoformat(), "report_ts": a.get("ts"),
+                "room": a.get("room"), "priority": "normal",
+            })
+    return cards
+
+
+def build_office(
+    data_dir: Path,
+    config: dict,
+    now: dt.datetime,
+    roster: dict | None = None,
+    activity: dict[str, dt.datetime] | None = None,
+    live_path: Path | None = None,
+    persona: dict | None = None,
+) -> tuple[dict, dict]:
+    """persona: office/persona.py 산출물 — 말투·성향으로 고른 외형. 관리자가 정한 외형이 있으면 그것이 먼저다."""
+    persona_people = (persona or {}).get("people", {})
     hits: dict[str, set] = {}
     people = load_people(data_dir, hits)
-    rooms = load_rooms(data_dir, now, hits, (roster or {}).get("rooms"))
+    rooms = load_rooms(data_dir, now, hits, (roster or {}).get("rooms"), activity)
     todos = load_todos(data_dir, now, hits)
     campaigns = load_campaigns(data_dir, hits)
     daily = load_daily(data_dir)
@@ -444,7 +542,7 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
                 "display_name": cfg.get("display_name") or name,
                 "role": cfg.get("role") or p["role"],
                 "team": cfg.get("team") or p["team"],
-                "look": cfg.get("look"),
+                "look": cfg.get("look") or (persona_people.get(name) or {}).get("look"),
                 "aliases": sorted({name, p["name"], *p["aliases"], *cfg.get("aliases", [])}),
                 "rooms": r["rooms"] if r else [],
                 "last_active": p.get("last_active"),
@@ -503,6 +601,11 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
                 return c
         return next((c for c in campaigns if c["name"] == room["title"]), None)
 
+    from daily_report import recent_messages
+
+    recent = recent_messages(data_dir, live_path, (now - dt.timedelta(days=WORK_REPORT_DAYS)).date())
+    work = work_cards(recent, owner_key, now)
+
     pipeline, hygiene = [], []
     for r in rooms:
         if r["stage"] is None:
@@ -543,6 +646,8 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
         "members": sum(1 for m in members if m["kind"] == "member"),
         "campaigns": len(campaigns),
         "pipeline_linked": sum(1 for x in pipeline if x["campaign"]),
+        "work": len(work),
+        "work_running": len({c["assignee"] for c in work if c["status"] == "running"}),
     }
 
     office = {
@@ -553,7 +658,7 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
             "environment": config.get("environment", "trading"),
         },
         "members": members,
-        "boards": {"ledger": ledger, "pipeline": pipeline},
+        "boards": {"ledger": ledger, "pipeline": pipeline, "work": work},
         "hygiene": sorted(hygiene, key=lambda h: -(h["quiet_days"] or 0)),
         "daily": daily,
         "counts": counts,
@@ -570,6 +675,7 @@ def build_office(data_dir: Path, config: dict, now: dt.datetime, roster: dict | 
             for name in ("people.json", "rooms.json", "todos.jsonl", "campaigns.json", "lark_daily.jsonl")
         },
         "rooms_source": "lark-api (roster)" if (roster or {}).get("rooms") else "rooms.json",
+        "live_activity_rooms": len(activity or {}),
         "matched_fields": {k: sorted(v) for k, v in sorted(hits.items())},
         "roster": (
             {
@@ -624,9 +730,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--data-dir", type=Path, default=Path("~/famigo_campaign/briefs/data").expanduser())
     ap.add_argument("--tools-dir", type=Path, help="lark_store.py 위치 (기본: <data-dir>/../tools)")
-    ap.add_argument("--config", type=Path, default=Path("config/office.config.json"))
+    # config·roster 는 기본값을 두지 않는다. 상대 경로 기본값은 실행 위치의 실데이터(out/·config/)를
+    # 조용히 끌어온다 — 합성 픽스처 테스트에 실명 명단이 섞였다(2026-09-28 실측). 쓰려면 명시한다.
+    ap.add_argument("--config", type=Path, help="config/office.config.json (없으면 설정 없이)")
     ap.add_argument("--out", type=Path, default=Path("out/office.json"))
-    ap.add_argument("--roster", type=Path, default=Path("out/lark_roster.json"), help="lark_roster.py 산출물 (없으면 people.json 만)")
+    ap.add_argument("--roster", type=Path, help="lark_roster.py 산출물 (없으면 people.json 만)")
+    ap.add_argument("--activity", type=Path, help="lark_live.py 의 방별 마지막 사람 발화 시각 (없으면 rooms.json 만)")
+    ap.add_argument("--live", type=Path, help="lark_live.py 의 실시간 원문 (업무 카드·'지금 Lark' 에 쓴다)")
+    ap.add_argument("--persona", type=Path, help="office/persona.py 산출물 (말투·성향으로 고른 외형)")
     ap.add_argument("--now", help="기준 시각 ISO (테스트용). 기본: 지금 KST")
     ap.add_argument("--doctor", action="store_true", help="원천 스키마 점검 결과만 출력")
     ap.add_argument("--allow-no-gate", action="store_true", help="게이트 없이 진행 (합성 픽스처 테스트 전용)")
@@ -636,12 +747,14 @@ def main(argv: list[str] | None = None) -> int:
     if not data_dir.is_dir():
         print(f"✗ 데이터 폴더가 없다: {data_dir}", file=sys.stderr)
         return 2
-    config = read_json(args.config) if args.config.exists() else {}
+    config = read_json(args.config) if args.config and args.config.exists() else {}
     now = parse_time(args.now) if args.now else dt.datetime.now(KST)
 
     try:
         roster = read_json(args.roster) if args.roster and args.roster.exists() else None
-        office, report = build_office(data_dir, config or {}, now, roster)
+        activity = load_activity(args.activity if args.activity and args.activity.exists() else None)
+        persona = read_json(args.persona) if args.persona and args.persona.exists() else None
+        office, report = build_office(data_dir, config or {}, now, roster, activity, args.live, persona)
     except SourceError as e:
         print(f"✗ {e}", file=sys.stderr)
         return 2
@@ -675,7 +788,8 @@ def main(argv: list[str] | None = None) -> int:
     print(
         f"✓ {args.out} · 기준 {office['generated_at']} · 직원 {c['members']} · "
         f"장부 {c['todos']}(열림 {c['todos_open']}, 방치 {c['todos_stale']}) · "
-        f"파이프라인 {len(office['boards']['pipeline'])} · 좀비 {len(office['hygiene'])} · 게이트 {office['gate']}"
+        f"파이프라인 {len(office['boards']['pipeline'])} · 좀비 {len(office['hygiene'])} · "
+        f"업무 카드 {c.get('work', 0)}(작업 중 {c.get('work_running', 0)}명) · 게이트 {office['gate']}"
     )
     return 0
 

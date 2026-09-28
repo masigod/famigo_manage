@@ -1,0 +1,12 @@
+/* Famigo Office — 앞단이 엔진 화면에 붙이는 스타일. 외부 링크 버튼(GitHub 별·피드백)은 숨긴다: 이 사무실은 바깥과 잇지 않는다. */
+[data-famigo-hidden] { display: none !important; }
+
+#famigo-notice {
+  position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); z-index: 2147483000;
+  max-width: min(760px, calc(100vw - 24px)); padding: 8px 14px; border-radius: 999px;
+  background: rgba(20, 27, 46, .88); color: #e6ebf5; font: 12px/1.5 -apple-system, "Apple SD Gothic Neo", sans-serif;
+  text-align: center; box-shadow: 0 4px 16px rgba(0,0,0,.18);
+}
+#famigo-notice strong { color: #e8a33d; }
+#famigo-notice a { color: #e8a33d; }
+@media (max-width: 640px) { #famigo-notice { border-radius: 10px; bottom: 8px; } }

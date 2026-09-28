@@ -134,11 +134,14 @@ export async function seed({
 }) {
   validateOffice(office);
   // 1. 계정
-  const login = await api.send("POST", "/api/auth/login", { loginId: account.loginId, password: account.password });
+  let login = await api.send("POST", "/api/auth/login", { loginId: account.loginId, password: account.password });
   if (!login.ok) {
     await api.request("POST", "/api/auth/register", account);
     log(`계정 생성: ${account.loginId}`);
+    login = await api.send("POST", "/api/auth/login", { loginId: account.loginId, password: account.password });
   }
+  // 사무실 소유자 계정의 DeskRPG userId — 대시보드·1:1 대화가 이 계정을 관리자(본인)로 알아본다(gateway/access.mjs).
+  const ownerUserId = login.data?.user?.id ?? null;
   const { characters = [] } = await api.request("GET", "/api/characters");
   if (!characters.length) {
     await api.request("POST", "/api/characters", {
@@ -247,6 +250,10 @@ export async function seed({
       updated: new Date().toISOString(),
       channel_id: channel.id,
       invite_code: inviteCode,
+      // 지금 사무실의 외형 {직원 키: 외형 id} — 말투 분석(office/persona.py)이 몸형을 이어 쓸 때 본다.
+      looks: Object.fromEntries(assignLooks(members, current).map((m) => [m.key, m.look])),
+      owner_user_id: ownerUserId,
+      owner_person: account.nickname,
       departed: departed.map((p) => ({ key: p.profileName ?? p.profile_name, display_name: p.displayName ?? p.profileName })),
     };
     writeFileSync(`${statePath}.tmp`, JSON.stringify(state, null, 2), { mode: 0o600 });
@@ -258,7 +265,7 @@ export async function seed({
 async function main() {
   const { values } = parseArgs({
     options: {
-      app: { type: "string", default: `http://127.0.0.1:${process.env.FAMIGO_DESK_PORT || 3300}` },
+      app: { type: "string", default: `http://127.0.0.1:${Number(process.env.FAMIGO_DESK_PORT || 3300) + 10}` }, // 엔진(이 Mac 안)
       gateway: { type: "string", default: "http://127.0.0.1:8642" },
       office: { type: "string", default: "out/office.json" },
       state: { type: "string", default: "out/seed_state.json" },

@@ -102,5 +102,25 @@ class GateFailClosedTest(unittest.TestCase):
             self.assertEqual(r.returncode, 3, r.stderr)
 
 
+class ImplicitInputTest(unittest.TestCase):
+    def test_cwd_roster_and_config_are_never_read_implicitly(self):
+        # 회귀: 기본값 out/lark_roster.json 이 실행 위치의 실명 명단을 픽스처 빌드에 섞었다.
+        with tempfile.TemporaryDirectory() as d:
+            (Path(d) / "out").mkdir()
+            (Path(d) / "config").mkdir()
+            leak = {"members": [{"id": "x", "name": "CWD-ROSTER-LEAK", "rooms": []}], "rooms": []}
+            (Path(d) / "out" / "lark_roster.json").write_text(json.dumps(leak), encoding="utf-8")
+            (Path(d) / "config" / "office.config.json").write_text(json.dumps({"org_name": "CWD-CONFIG-LEAK"}), encoding="utf-8")
+            out = Path(d) / "o.json"
+            r = subprocess.run(
+                [sys.executable, str(BUILDER), "--data-dir", str(FIXTURE / "data"), "--out", str(out), "--now", NOW],
+                capture_output=True, text=True, cwd=d,
+            )
+            self.assertEqual(r.returncode, 0, r.stderr)
+            raw = out.read_text(encoding="utf-8")
+            self.assertNotIn("CWD-ROSTER-LEAK", raw)
+            self.assertNotIn("CWD-CONFIG-LEAK", raw)
+
+
 if __name__ == "__main__":
     unittest.main()

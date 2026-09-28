@@ -12,6 +12,6 @@
     "doctor": "bash scripts/office.sh doctor",
     "gateway": "bash scripts/office.sh gateway",
     "seed": "bash scripts/office.sh seed",
-    "test": "python3 -m unittest discover -s tests && node --test tests/*.test.mjs"
+    "test": "FAMIGO_LOOKS=tests/fixtures/looks.json python3 -m unittest discover -s tests && FAMIGO_LOOKS=tests/fixtures/looks.json node --test --test-timeout=30000 tests/*.test.mjs"
   }
 }

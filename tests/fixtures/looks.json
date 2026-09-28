@@ -1,0 +1,146 @@
+[
+  {
+    "id": "office-seo",
+    "name": "가상1",
+    "category": "classic",
+    "subtitle": "가상 설명 1",
+    "stance": "composed",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-garam",
+    "name": "가상2",
+    "category": "creative",
+    "subtitle": "가상 설명 2",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-jun",
+    "name": "가상3",
+    "category": "classic",
+    "subtitle": "가상 설명 3",
+    "stance": "composed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-tae",
+    "name": "가상4",
+    "category": "casual",
+    "subtitle": "가상 설명 4",
+    "stance": "relaxed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-yun",
+    "name": "가상5",
+    "category": "leadership",
+    "subtitle": "가상 설명 5",
+    "stance": "composed",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-ha",
+    "name": "가상6",
+    "category": "creative",
+    "subtitle": "가상 설명 6",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-jin",
+    "name": "가상7",
+    "category": "creative",
+    "subtitle": "가상 설명 7",
+    "stance": "relaxed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-eun",
+    "name": "가상8",
+    "category": "casual",
+    "subtitle": "가상 설명 8",
+    "stance": "relaxed",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-min",
+    "name": "가상9",
+    "category": "leadership",
+    "subtitle": "가상 설명 9",
+    "stance": "composed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-do",
+    "name": "가상10",
+    "category": "casual",
+    "subtitle": "가상 설명 10",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-nari",
+    "name": "가상11",
+    "category": "casual",
+    "subtitle": "가상 설명 11",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-kyu",
+    "name": "가상12",
+    "category": "leadership",
+    "subtitle": "가상 설명 12",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-ara",
+    "name": "가상13",
+    "category": "classic",
+    "subtitle": "가상 설명 13",
+    "stance": "relaxed",
+    "outfit": "suit",
+    "bodyType": "female"
+  },
+  {
+    "id": "office-seok",
+    "name": "가상14",
+    "category": "classic",
+    "subtitle": "가상 설명 14",
+    "stance": "relaxed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-roan",
+    "name": "가상15",
+    "category": "creative",
+    "subtitle": "가상 설명 15",
+    "stance": "composed",
+    "outfit": "suit",
+    "bodyType": "male"
+  },
+  {
+    "id": "office-soi",
+    "name": "가상16",
+    "category": "leadership",
+    "subtitle": "가상 설명 16",
+    "stance": "bright",
+    "outfit": "suit",
+    "bodyType": "female"
+  }
+]

@@ -10,6 +10,8 @@ import subprocess
 import sys
 import tempfile
 import unittest
+import os
+import urllib.error
 import urllib.parse
 from pathlib import Path
 
@@ -47,8 +49,9 @@ MEMBERS = {
 class FakeLark:
     """page_size=1 로 쪼개 페이지 넘김을 강제한다."""
 
-    def __init__(self, members=MEMBERS):
+    def __init__(self, members=MEMBERS, chats=CHATS):
         self.members = members
+        self.chats = chats
         self.calls = []
 
     def __call__(self, req, timeout=None):
@@ -63,6 +66,10 @@ class FakeLark:
         assert req.get_method() == "GET"  # 읽기 전용
         if url.path == "/open-apis/im/v1/chats":
             items = CHATS
+        elif url.path.startswith("/open-apis/im/v1/chats/") and not url.path.endswith("/members"):
+            chat_id = url.path.rsplit("/", 1)[-1]
+            chat = next((c for c in self.chats if c["chat_id"] == chat_id), None)
+            return self._resp({"code": 0, "msg": "success", "data": {k: v for k, v in (chat or {}).items() if k != "chat_id"}})
         else:
             assert q["member_id_type"] == "open_id"
             items = self.members.get(url.path.split("/")[-2], [])
@@ -96,13 +103,14 @@ class RosterTest(unittest.TestCase):
             self.assertNotIn(name, raw)
         # 외부 방은 이름까지만 (§0.4) — 방 목록엔 있고 구성원은 안 본다
         self.assertEqual(
-            roster["rooms"],
+            [{k: r[k] for k in ("chat_id", "name", "external")} for r in roster["rooms"]],
             [
                 {"chat_id": "oc_a", "name": "일일업무", "external": False},
                 {"chat_id": "oc_b", "name": "진행중 - 가상 캠페인 A", "external": False},
                 {"chat_id": "oc_ext", "name": "외부 협업방", "external": True},
             ],
         )
+        self.assertNotIn("members", roster["rooms"][2])  # 외부 방 구성원은 보지 않는다
         self.assertEqual(roster["chats_skipped"], {"bot": 1, "external": 1, "not_normal": 1, "foreign_member": 1})
 
     def test_open_id_and_secret_never_stored(self):
@@ -201,3 +209,81 @@ class MergeTest(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+
+class TargetedRefreshTest(unittest.TestCase):
+    """이벤트가 가리킨 방만 — 월 호출 한도를 지키는 명단 갱신 (2026-09-28 한도 초과 사고 뒤)."""
+
+    def full(self):
+        fake = FakeLark(members={k: list(v) for k, v in MEMBERS.items()}, chats=[dict(c) for c in CHATS])
+        client = lark_roster.LarkClient("https://open.larksuite.com", "cli_test", "s3cret", opener=fake)
+        return lark_roster.build_roster(client, NOW), fake, client
+
+    def test_one_room_refresh_is_cheap_and_correct(self):
+        roster, fake, client = self.full()
+        fake.members["oc_b"] = [
+            {"member_id_type": "open_id", "member_id": "ou_9x", "name": "새 합류자", "tenant_key": HOME},
+            {"member_id_type": "open_id", "member_id": "ou_y", "name": "다른 회사", "tenant_key": OTHER},
+        ]
+        fake.calls.clear()
+        after = lark_roster.refresh_chats(client, roster, ["oc_b"], [], NOW)
+        self.assertLessEqual(len(fake.calls), 5)  # 토큰 1 + 방 정보 1 + 구성원(1명씩 쪼갠 페이지) — 전체 수집의 방 수만큼이 아니다
+        by = {m["name"]: m["rooms"] for m in after["members"]}
+        self.assertEqual(by["Alpha Kim"], ["일일업무"])  # oc_b 에서 빠졌다
+        self.assertEqual(by["새 합류자"], ["가상 캠페인 A"])
+        self.assertNotIn("다른 회사", by)  # 집 테넌트 해시로 거른다
+        self.assertNotIn("t_home", json.dumps(after))  # 테넌트 원문은 남기지 않는다
+
+    def test_disbanded_room_costs_nothing(self):
+        roster, fake, client = self.full()
+        fake.calls.clear()
+        after = lark_roster.refresh_chats(client, roster, [], ["oc_a"], NOW)
+        self.assertEqual(fake.calls, [])
+        names = {m["name"] for m in after["members"]}
+        self.assertNotIn("새 직원", names)  # oc_a 에만 있던 사람은 빠진다
+        self.assertIn("Alpha Kim", names)
+
+
+class MeterTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+
+    def tearDown(self):
+        import shutil
+
+        shutil.rmtree(self.dir)
+
+    def test_daily_budget_and_quota_block(self):
+        import lark_meter
+
+        meter = lark_meter.CallMeter(self.dir / "calls.json", daily_budget=2, today=lambda: dt.date(2026, 9, 28))
+        meter.take()
+        meter.take()
+        with self.assertRaises(lark_meter.BudgetExceeded):
+            meter.take()
+        self.assertEqual(meter.quota_exceeded(), "2026-10-01")
+        self.assertEqual(meter.blocked_until(), "2026-10-01")
+        self.assertEqual(os.stat(self.dir / "calls.json").st_mode & 0o777, 0o600)
+        nextmonth = lark_meter.CallMeter(self.dir / "calls.json", daily_budget=2, today=lambda: dt.date(2026, 10, 1))
+        nextmonth.take()  # 다음 달이면 다시 된다
+
+    def test_quota_exceeded_stops_without_retry(self):
+        import lark_meter
+
+        calls = []
+
+        def opener(req, timeout=None):
+            calls.append(req.full_url)
+            body = io.BytesIO(json.dumps({"code": 99991403, "msg": "This month's API call quota has been exceeded"}).encode())
+            raise urllib.error.HTTPError(req.full_url, 429, "Too Many Requests", {}, body)
+
+        meter = lark_meter.CallMeter(self.dir / "calls.json", today=lambda: dt.date(2026, 9, 28))
+        client = lark_roster.LarkClient("https://open.larksuite.com", "a", "b", opener=opener, meter=meter)
+        with self.assertRaises(lark_roster.LarkError) as cm:
+            client.authenticate()
+        self.assertIn("2026-10-01", str(cm.exception))
+        self.assertEqual(len(calls), 1)  # 재시도로 한도를 더 쓰지 않는다
+        with self.assertRaises(lark_roster.LarkError):
+            client.authenticate()
+        self.assertEqual(len(calls), 1)  # 막힌 뒤로는 나가지도 않는다

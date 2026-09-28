@@ -1,56 +1,16 @@
-// DeskRPG 오피스 룩 50종 — dandacompany/deskrpg src/game/three/office-looks*.ts 에서 추출.
-// DeskRPG 가 룩을 바꾸면 validateOfficeAppearance 가 'unknown office look' 으로 거절한다 → 다시 추출.
-export const OFFICE_LOOKS = [
-  { id: "office-jun", name: "서준", subtitle: "첫 출근의 설렘 · 네이비 수트와 사원증", bodyType: "male" },
-  { id: "office-tae", name: "태오", subtitle: "현장을 아는 베테랑 · 셔츠와 느슨한 타이", bodyType: "male" },
-  { id: "office-seo", name: "서린", subtitle: "차분한 추진력 · 차콜 수트와 포니테일", bodyType: "female" },
-  { id: "office-min", name: "민재", subtitle: "정돈된 취향 · 체크 수트와 둥근 안경", bodyType: "male" },
-  { id: "office-do", name: "도윤", subtitle: "든든한 동료 · 니트 베스트와 셔츠", bodyType: "male" },
-  { id: "office-yun", name: "윤서", subtitle: "단단한 리더 · 네이비 재킷과 와이드 팬츠", bodyType: "female" },
-  { id: "office-ha", name: "하경", subtitle: "선명한 아이디어 · 머스터드 니트와 와이드 팬츠", bodyType: "female" },
-  { id: "office-jin", name: "진우", subtitle: "책을 만드는 사람 · 카멜 코트와 터틀넥", bodyType: "male" },
-  { id: "office-eun", name: "은채", subtitle: "따뜻한 집중력 · 카디건과 플리츠 롱스커트", bodyType: "female" },
-  { id: "office-hyeon", name: "현진", subtitle: "경험이 만든 여유 · 실버 헤어와 다크 쓰리피스", bodyType: "male" },
-  { id: "office-nari", name: "나리", subtitle: "광고 기획자 · 리본 블라우스와 무릎 스커트", bodyType: "female" },
-  { id: "office-roan", name: "로안", subtitle: "아트디렉터 · 검은 터틀넥과 체크 코트", bodyType: "male" },
-  { id: "office-soi", name: "소이", subtitle: "브랜드 전략가 · 올림머리와 더블 재킷", bodyType: "female" },
-  { id: "office-yul", name: "율", subtitle: "카피라이터 · 곱슬머리와 니트 베스트", bodyType: "male" },
-  { id: "office-bomi", name: "보미", subtitle: "콘텐츠 프로듀서 · 땋은 머리와 긴 치마", bodyType: "female" },
-  { id: "office-jiho", name: "지호", subtitle: "촬영 감독 · 셔츠와 현장 헤드셋", bodyType: "male" },
-  { id: "office-dami", name: "다미", subtitle: "캠페인 매니저 · 스카프와 짧은 단발", bodyType: "female" },
-  { id: "office-seul", name: "슬아", subtitle: "디자인 리서처 · 긴 머리와 넉넉한 니트", bodyType: "female" },
-  { id: "office-kyu", name: "규민", subtitle: "클라이언트 파트너 · 줄무늬 수트와 타이", bodyType: "male" },
-  { id: "office-ara", name: "아라", subtitle: "행사 디렉터 · 포니테일과 활동적인 베스트", bodyType: "female" },
-  { id: "office-ian", name: "이안", subtitle: "백엔드 개발자 · 안경과 후드 집업", bodyType: "male" },
-  { id: "office-rumi", name: "루미", subtitle: "프런트엔드 개발자 · 땋은 머리와 후드", bodyType: "female" },
-  { id: "office-gonu", name: "건우", subtitle: "QA 엔지니어 · 체크 셔츠와 기록 노트", bodyType: "male" },
-  { id: "office-haena", name: "해나", subtitle: "데이터 과학자 · 연구 가운과 올림머리", bodyType: "female" },
-  { id: "office-woojin", name: "우진", subtitle: "사내 IT 담당 · 곱슬머리와 넓은 바지", bodyType: "male" },
-  { id: "office-jua", name: "주아", subtitle: "UX 디자이너 · 물결 머리와 리본 니트", bodyType: "female" },
-  { id: "office-taemin", name: "태민", subtitle: "스크럼 마스터 · 베스트와 사원증", bodyType: "male" },
-  { id: "office-sera", name: "세라", subtitle: "보안 엔지니어 · 긴 머리와 터틀넥 코트", bodyType: "female" },
-  { id: "office-hosu", name: "호수", subtitle: "로봇 연구원 · 짧은 머리와 실험 가운", bodyType: "male" },
-  { id: "office-yena", name: "예나", subtitle: "커뮤니티 매니저 · 단발과 넉넉한 후드", bodyType: "female" },
-  { id: "office-sungho", name: "성호", subtitle: "운영 총괄 · 실버 가르마와 더블 수트", bodyType: "male" },
-  { id: "office-hyejin", name: "혜진", subtitle: "재무 책임자 · 올림머리와 차분한 스카프", bodyType: "female" },
-  { id: "office-jungwon", name: "정원", subtitle: "인사 책임자 · 은빛 단발과 긴 니트", bodyType: "female" },
-  { id: "office-seok", name: "석현", subtitle: "사업 대표 · 웨이브 헤어와 체크 수트", bodyType: "male" },
-  { id: "office-mira", name: "미라", subtitle: "크리에이티브 총괄 · 긴 머리와 더블 재킷", bodyType: "female" },
-  { id: "office-kyung", name: "경수", subtitle: "법무 책임자 · 정돈된 머리와 쓰리피스", bodyType: "male" },
-  { id: "office-yeon", name: "연화", subtitle: "이사회 의장 · 실버 올림머리와 코트", bodyType: "female" },
-  { id: "office-dohun", name: "도훈", subtitle: "창업자 · 곱슬머리와 실용적인 후드", bodyType: "male" },
-  { id: "office-suhye", name: "수혜", subtitle: "영업 총괄 · 포니테일과 선명한 수트", bodyType: "female" },
-  { id: "office-jaewon", name: "재원", subtitle: "전략 고문 · 은빛 웨이브와 터틀넥", bodyType: "male" },
-  { id: "office-daeun", name: "다은", subtitle: "문학 편집자 · 긴 머리와 긴 스커트", bodyType: "female" },
-  { id: "office-jiseok", name: "지석", subtitle: "번역 편집자 · 곱슬머리와 체크 베스트", bodyType: "male" },
-  { id: "office-seona", name: "선아", subtitle: "북디자이너 · 땋은 머리와 아틀리에 코트", bodyType: "female" },
-  { id: "office-haram", name: "하람", subtitle: "해외 판권 담당 · 스카프와 더블 수트", bodyType: "female" },
-  { id: "office-chan", name: "찬영", subtitle: "제작 관리 · 셔츠와 공방 사원증", bodyType: "male" },
-  { id: "office-eunsol", name: "은솔", subtitle: "교정 교열자 · 올림머리와 니트 카디건", bodyType: "female" },
-  { id: "office-sejin", name: "세진", subtitle: "협상 전문가 · 가르마와 핀스트라이프", bodyType: "male" },
-  { id: "office-hyo", name: "효주", subtitle: "서점 영업 · 짧은 단발과 편안한 베스트", bodyType: "female" },
-  { id: "office-yumin", name: "유민", subtitle: "파트너십 매니저 · 웨이브와 노타이 수트", bodyType: "male" },
-  { id: "office-garam", name: "가람", subtitle: "작가 매니저 · 포니테일과 넉넉한 코트", bodyType: "female" },
-];
+// DeskRPG 오피스 외형 목록 — 설치된 DeskRPG 에서 추출한 로컬 파일(out/looks.json)을 읽는다.
+// 저장소에는 싣지 않는다(DeskRPG 내용 · Sustainable Use License). 만드는 법: scripts/extract-looks.mjs
+// (install-mac.sh 가 설치 때마다 돌린다). 테스트는 FAMIGO_LOOKS 로 합성 목록을 쓴다.
 
-export const OFFICE_LOOK_IDS = OFFICE_LOOKS.map((l) => l.id);
+import { existsSync, readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const path = process.env.FAMIGO_LOOKS || join(dirname(fileURLToPath(import.meta.url)), "..", "out", "looks.json");
+if (!existsSync(path)) {
+  throw new Error(`외형 목록이 없다: ${path} — bash scripts/install-mac.sh (또는 node scripts/extract-looks.mjs) 가 만든다`);
+}
+
+/** [{ id, name, category, subtitle, stance, outfit, bodyType }] */
+export const OFFICE_LOOKS = Object.freeze(JSON.parse(readFileSync(path, "utf8")));
+export const OFFICE_LOOK_IDS = Object.freeze(OFFICE_LOOKS.map((l) => l.id));

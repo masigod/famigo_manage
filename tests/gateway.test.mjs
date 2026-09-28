@@ -108,8 +108,11 @@ test("Syn 은 방 대화에서 결정 대기를 경과일과 함께 말한다", 
   assert.match(events.data, /T001 가상 리워드 금액 확정 — 29일째/);
 });
 
-test("회의(방이 아닌 run)는 SPEAK: 한 줄로 말한다", async () => {
-  const run = await call("POST", "/p/bravo-lee/v1/runs", { body: { input: "안건" } });
+test("회의(세션 키 …-meeting-<channelId>)는 SPEAK: 한 줄로 말한다", async () => {
+  const run = await call("POST", "/p/bravo-lee/v1/runs", {
+    body: { input: "안건" },
+    headers: { "x-hermes-session-key": "npc-1-meeting-ch-1" },
+  });
   const events = await call("GET", `/p/bravo-lee/v1/runs/${run.data.run_id}/events`);
   const completed = /event: message\.completed\ndata: (.*)\n/.exec(events.data);
   assert.match(JSON.parse(completed[1]).content, /^SPEAK: Bravo Lee/);
@@ -159,4 +162,16 @@ test("퇴장은 사람이 정한다: 관리자 퇴장·플레이어만 지우고
   );
   assert.deepEqual(retire.map((r) => [r.profile.profileName, r.why]), [["help", "관리자 퇴장"], ["dylan", "플레이어 본인"]]);
   assert.deepEqual(departed.map((p) => p.profileName), ["gone"]);
+});
+
+test("결과물·크론 패널은 계약대로 0건을 답한다 (업데이트 안내 대신)", async () => {
+  const info = (await call("GET", "/deskrpg/info")).data;
+  assert.ok(info.capabilities.includes("artifacts"));
+  const list = await call("GET", "/deskrpg/artifacts?profiles=syn&limit=50");
+  assert.deepEqual([list.status, list.data.artifacts, list.data.has_more], [200, [], false]);
+  assert.equal((await call("GET", "/deskrpg/artifacts/a-1")).status, 404);
+  assert.equal((await call("DELETE", "/deskrpg/artifacts/a-1")).status, 403);
+  assert.deepEqual((await call("GET", "/p/syn/deskrpg/cron/jobs?include_disabled=true")).data, { jobs: [] });
+  assert.deepEqual((await call("GET", "/p/syn/deskrpg/cron/delivery-targets")).data, { targets: [] });
+  assert.equal((await call("POST", "/p/syn/deskrpg/cron/jobs", { body: { name: "x" } })).status, 403);
 });

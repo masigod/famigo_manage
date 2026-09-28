@@ -78,7 +78,9 @@ function campaignLines(c) {
 
 export function pipelineCard(item, office) {
   const quiet = item.quiet_days;
+  const owner = item.assignee ? office.members.find((m) => m.key === item.assignee)?.display_name ?? item.assignee : null;
   const lines = [
+    owner ? `캠페인 담당: ${owner}` : "캠페인 담당: 레지스트리에 기록 없음",
     `방 이름 접두사: ${item.stage}${item.stage_note ? ` (${item.stage_note})` : ""}`,
     `마지막 사람 발화 이후 ${daysLabel(quiet)}`,
     item.zombie ? "⚠ 좀비 후보 — 진행중·준비중인데 21일 이상 조용. 막힌 것인지 죽은 것인지 판정 필요" : null,
@@ -90,7 +92,8 @@ export function pipelineCard(item, office) {
     title: `${item.zombie ? "🔴 " : ""}${item.title} · ${daysLabel(quiet)} 조용`,
     body: lines.join("\n"),
     status: item.status,
-    ...(item.assignee ? { assignee: item.assignee } : {}),
+    // assignee 를 두지 않는다: DeskRPG 는 재시작 때 running 카드의 assignee 를 '작업 중'으로 되살린다(resync).
+    // 캠페인이 진행중이라는 사실이 담당자를 몇 주씩 작업 중으로 만들면 안 된다 — 담당은 본문에 적는다.
     priority: item.zombie ? "high" : "normal",
     tenant: item.stage,
     comment_count: 0,
@@ -98,8 +101,46 @@ export function pipelineCard(item, office) {
   };
 }
 
+const SECTION_LABEL = {
+  doing: "진행 중",
+  blocked: "막힘 · 이슈",
+  support: "지원 요청",
+  action: "우선순위 High",
+  next: "다음 할 일",
+  today: "한 일",
+  presence: "지금 Lark 에서 활동 중",
+};
+
+/**
+ * 일일보고·실시간 발화에서 온 업무 카드. 사무실 기본 보드에 장부와 함께 올라가, 직원을 누르면 '카드' 탭에 그 사람의 일로
+ * 보인다(DeskRPG 는 기본 보드를 assignee 로 걸러 보여 준다). running 카드가 있으면 3D 이름표가 '작업 중'이 된다.
+ */
+export function workCard(item) {
+  const presence = item.section === "presence";
+  const created = Date.parse(item.report_ts ? item.report_ts + (/[zZ]|[+-]\d\d:?\d\d$/.test(item.report_ts) ? "" : "+09:00") : "");
+  return {
+    id: item.id,
+    title: presence ? item.title : `${item.title}`,
+    body: [
+      presence
+        ? `Lark 에서 방금 발화가 있었습니다 (${item.report_ts?.replace("T", " ") ?? "시각 미기록"}) — 내용은 옮기지 않습니다.`
+        : `${item.author} 님의 일일보고 ${item.report_date} · ${SECTION_LABEL[item.section] ?? item.section}`,
+      item.room ? `방: ${item.room}` : null,
+    ]
+      .filter(Boolean)
+      .join("\n"),
+    status: item.status,
+    assignee: item.assignee,
+    priority: item.priority,
+    tenant: presence ? "지금" : "일일보고",
+    ...(Number.isFinite(created) ? { created_at: Math.floor(created / 1000), ...(item.status === "running" ? { started_at: Math.floor(created / 1000) } : {}) } : {}),
+    comment_count: 0,
+  };
+}
+
 export function cardsFor(view, office) {
-  if (view === "ledger") return office.boards.ledger.map((i) => ledgerCard(i, office));
+  if (view === "ledger")
+    return office.boards.ledger.map((i) => ledgerCard(i, office)).concat((office.boards.work ?? []).map(workCard));
   if (view === "pipeline") return office.boards.pipeline.map((i) => pipelineCard(i, office));
   return [];
 }

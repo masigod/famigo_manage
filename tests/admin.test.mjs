@@ -2,15 +2,15 @@
 
 import { test, before, after } from "node:test";
 import assert from "node:assert/strict";
+import { request } from "node:http";
 import { mkdtempSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { applyMemberChange, adminState, createAdmin } from "../admin/server.mjs";
+import { applyAccountChange, applyMemberChange, adminState, createAdmin, isLoopbackHost } from "../admin/server.mjs";
 import { renderAdminPage } from "../admin/page.mjs";
 
-const PASSWORD = "admin-test-password";
 let root, server, base, syncCalls;
-const auth = { Authorization: "Basic " + Buffer.from(`admin:${PASSWORD}`).toString("base64") };
+const auth = {}; // 로그인 없음 — 이 Mac 전용(루프백 바인딩 + Host 검사)
 
 before(async () => {
   root = mkdtempSync(join(tmpdir(), "famigo-admin-"));
@@ -24,7 +24,7 @@ before(async () => {
   syncCalls = 0;
   server = createAdmin({
     root,
-    password: PASSWORD,
+    listDeskUsers: () => ({ users: [{ id: "00000000-0000-4000-8000-00000000000d", loginId: "echo", nickname: "Echo Park" }], error: null }),
     runSync: async (out) => {
       syncCalls += 1;
       out("ok\n");
@@ -40,10 +40,28 @@ after(() => {
   rmSync(root, { recursive: true, force: true });
 });
 
-test("인증 없으면 401", async () => {
-  assert.equal((await fetch(base + "/")).status, 401);
-  const wrong = { Authorization: "Basic " + Buffer.from("admin:nope").toString("base64") };
-  assert.equal((await fetch(base + "/api/state", { headers: wrong })).status, 401);
+function getWithHost(path, host) {
+  return new Promise((resolve, reject) => {
+    const req = request({ host: "127.0.0.1", port: server.address().port, path, headers: { Host: host } }, (res) => {
+      res.resume();
+      resolve(res.statusCode);
+    });
+    req.on("error", reject);
+    req.end();
+  });
+}
+
+test("로그인 없이 이 Mac 에서는 열린다", async () => {
+  assert.equal((await fetch(base + "/")).status, 200);
+  assert.equal((await fetch(base + "/api/state")).status, 200);
+  assert.equal(await getWithHost("/api/state", `localhost:${server.address().port}`), 200);
+});
+
+test("DNS 리바인딩: Host 가 루프백 이름이 아니면 403", async () => {
+  assert.equal(await getWithHost("/api/state", "evil.example:3101"), 403);
+  assert.equal(await getWithHost("/", "192.168.0.179:3101"), 403);
+  assert.ok(isLoopbackHost("127.0.0.1:3101") && isLoopbackHost("[::1]:3101") && isLoopbackHost("LOCALHOST"));
+  assert.ok(!isLoopbackHost("127.0.0.1.evil.example") && !isLoopbackHost(undefined));
 });
 
 test("다른 사이트에서 온 쓰기(CSRF)는 403", async () => {
@@ -106,4 +124,42 @@ test("관리 화면은 이름을 innerHTML 로 넣지 않는다 (XSS)", () => {
   const html = renderAdminPage();
   assert.ok(!/innerHTML/.test(html));
   assert.ok(!/<script src=|<link [^>]*href="http/.test(html)); // 외부 리소스 0
+});
+
+test("계정 연결: DeskRPG 계정 ↔ Lark 사람 + 역할, 형식이 틀리면 400 · 저장해도 사무실 재배치는 없다", async () => {
+  const uid = "00000000-0000-4000-8000-00000000000d";
+  let c = applyAccountChange({}, { action: "link_account", userId: uid, person: "Echo Park", role: "admin" });
+  assert.deepEqual(c.accounts[uid], { person: "Echo Park", role: "admin" });
+  assert.throws(() => applyAccountChange(c, { action: "link_account", userId: uid, person: "Echo Park", role: "owner" }), /역할/);
+  assert.throws(() => applyAccountChange(c, { action: "link_account", userId: "../x", person: "Echo Park", role: "admin" }), /userId/);
+  assert.deepEqual(applyAccountChange(c, { action: "unlink_account", userId: uid }).accounts, {});
+
+  const before = syncCalls;
+  const r = await fetch(base + "/api/account", {
+    method: "POST",
+    headers: { "Content-Type": "application/json", "X-Famigo-Admin": "1", Origin: base },
+    body: JSON.stringify({ action: "link_account", userId: uid, person: "Echo Park", role: "admin" }),
+  });
+  assert.equal(r.status, 200);
+  assert.equal(syncCalls, before);
+  const state = await (await fetch(base + "/api/state")).json();
+  assert.deepEqual(state.accounts.linked[uid], { person: "Echo Park", role: "admin" });
+  assert.deepEqual(state.accounts.users.map((u) => u.nickname), ["Echo Park"]);
+  const csrf = await fetch(base + "/api/account", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" });
+  assert.equal(csrf.status, 403);
+});
+
+test("팀원 초대 주소: 사설망 주소 우선, 링크 로컬(169.254)은 빼고", async () => {
+  const { lanAddresses } = await import("../admin/server.mjs");
+  const ifs = {
+    bridge0: [{ family: "IPv4", internal: false, address: "169.254.63.22" }],
+    en0: [{ family: "IPv4", internal: false, address: "192.168.0.179" }],
+    lo0: [{ family: "IPv4", internal: true, address: "127.0.0.1" }],
+  };
+  assert.deepEqual(lanAddresses(ifs), ["192.168.0.179"]);
+});
+
+test("가입 열기/닫기는 open·closed 만", () => {
+  assert.equal(applyAccountChange({}, { action: "signup", value: "closed" }).signup, "closed");
+  assert.throws(() => applyAccountChange({}, { action: "signup", value: "maybe" }), /signup/);
 });

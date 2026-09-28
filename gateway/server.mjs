@@ -15,11 +15,15 @@
 //           scripts/readme-capture/mock-hermes.ts (플러그인 0.6.0+ automation 계약)
 
 import { createServer } from "node:http";
-import { existsSync, readFileSync, renameSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { parseArgs } from "node:util";
 import { createOfficeSource, renderBoard, cardsFor } from "./office-model.mjs";
+import { createEventLog } from "./events.mjs";
 import { composeReply } from "./replies.mjs";
+import { personalReply } from "./personal.mjs";
+import { createIdentitySource } from "./access.mjs";
+import { createDashboard } from "../dashboard/server.mjs";
 import { fileURLToPath } from "node:url";
 import { createAdmin, shellSync } from "../admin/server.mjs";
 
@@ -99,9 +103,58 @@ function createBoardRegistry(statePath) {
   };
 }
 
-export function createGateway({ officePath, token, statePath }) {
+/** 파일 mtime 이 바뀔 때만 다시 읽는 JSON (없으면 null). */
+function cachedJson(path) {
+  let cache = null;
+  let mtime = -1;
+  return () => {
+    if (!path || !existsSync(path)) return null;
+    const m = statSync(path).mtimeMs;
+    if (m !== mtime) {
+      cache = JSON.parse(readFileSync(path, "utf8"));
+      mtime = m;
+    }
+    return cache;
+  };
+}
+
+/**
+ * personal: 1:1 대화 개인화(없으면 모두 공용 답).
+ *   { insightsPath, identity(userId) → {person, role} | null, dashboardUrl }
+ */
+export function createGateway({ officePath, token, statePath, eventsPath = null, personal = null }) {
+  const insights = cachedJson(personal?.insightsPath);
+  /** 묻는 사람에 맞춘 답 — 1:1 이면서 볼 권한이 있을 때만 개인화, 아니면 공용 답. */
+  const replyFor = (name, input, office, { meeting = false, sessionKey = "" } = {}) => {
+    const member = office.members.find((mb) => mb.key === name);
+    if (!meeting && member && personal) {
+      const text = personalReply({
+        member,
+        sessionKey,
+        insights: insights(),
+        office,
+        identity: personal.identity,
+        dashboardUrl: personal.dashboardUrl,
+      });
+      if (text) return text;
+    }
+    return composeReply(name, input, office, { meeting });
+  };
   if (!token || token.length < 16) throw new Error("FAMIGO_GATEWAY_TOKEN 은 16자 이상이어야 한다");
-  const load = createOfficeSource(officePath);
+  const source = createOfficeSource(officePath);
+  const events = createEventLog(eventsPath);
+  let observed = null;
+  // office.json 이 새로 읽힐 때마다(= 실시간 데몬이 재빌드할 때마다) 카드 변화를 이벤트로 남긴다.
+  // DeskRPG 가 /deskrpg/events 를 폴링하며 load() 를 부르므로 따로 감시할 필요가 없다.
+  const load = () => {
+    const office = source();
+    if (office !== observed) {
+      observed = office;
+      const n = events.observe(office);
+      if (n) console.log(`[famigo-gateway] office.json 갱신 · 카드 변화 ${n}건`);
+    }
+    return office;
+  };
   load(); // 시작 시점에 스키마를 한 번 검사한다 — 틀리면 바로 죽는다.
   const boards = createBoardRegistry(statePath);
   const runs = new Map();
@@ -127,7 +180,9 @@ export function createGateway({ officePath, token, statePath }) {
       return json(res, 200, {
         plugin: "deskrpg",
         version: PLUGIN_VERSION,
-        capabilities: ["kanban", "cron", "events"],
+        // artifacts: DeskRPG 는 버전이 아니라 이 문자열로 결과물 패널을 연다(artifact-access.ts).
+        // 이 사무실의 직원은 에이전트가 아니라 결과물을 만들지 않는다 — 목록은 정직하게 0건이다.
+        capabilities: ["kanban", "cron", "events", "artifacts"],
         timezone: "Asia/Seoul",
         kanban: { dispatcher_present: false, attachments: false },
         dashboard_url: null,
@@ -174,9 +229,25 @@ export function createGateway({ officePath, token, statePath }) {
     if (p === "/deskrpg/kanban/events" && m === "GET")
       return json(res, 200, { events: [], board, kind: "status", truncated: false });
     if (p === "/deskrpg/kanban/dispatch" && m === "POST") return json(res, 200, { dispatched: [], skipped: [] });
-    if (p === "/deskrpg/events" && m === "GET")
-      // 변화는 office.json 재생성으로 들어온다. 이벤트 스트림은 비어 있다(재생 없음).
-      return json(res, 200, { events: [], cursor: "0", has_more: false });
+    if (p === "/deskrpg/events" && m === "GET") {
+      // 변화는 office.json 재생성으로 들어온다 — 직전 판과의 카드 차이가 이벤트다(events.mjs).
+      const b = board ? (boards.get(board) ?? boards.ensure(board, board).board) : null;
+      const limit = Number(url.searchParams.get("limit"));
+      return json(
+        res,
+        200,
+        events.poll({
+          board: board || undefined,
+          view: b ? viewOf(b) : null,
+          cursor: url.searchParams.get("cursor"),
+          limit: Number.isInteger(limit) && limit > 0 ? limit : 200,
+        }),
+      );
+    }
+    // 결과물(플러그인 0.8.0 계약) — 목록 0건, 개별 조회는 없음.
+    if (p === "/deskrpg/artifacts" && m === "GET") return json(res, 200, { artifacts: [], cursor: "a0", has_more: false });
+    if (/^\/deskrpg\/artifacts\/[^/]+(\/versions\/\d+\/content)?$/.test(p) && m === "GET")
+      return json(res, 404, { error: "artifact_not_found" });
     if (m !== "GET") return json(res, 403, READ_ONLY);
     return json(res, 404, { error: "not_found" });
   }
@@ -206,21 +277,28 @@ export function createGateway({ officePath, token, statePath }) {
     if (m === "POST" && /^\/api\/sessions\/[^/]+\/chat\/stream$/.test(path)) {
       const body = await readBody(req);
       const input = String(body.message ?? body.input ?? body.content ?? "");
-      return sse(res, "assistant", composeReply(name, input, office));
+      return sse(res, "assistant", replyFor(name, input, office, { sessionKey: req.headers["x-hermes-session-key"] }));
     }
     if (m === "POST" && path === "/v1/runs") {
       const body = await readBody(req);
       const id = `famigo-run-${++seq}`;
-      const room = String(req.headers["x-hermes-session-key"] ?? "").includes("-room-");
-      runs.set(id, { name, input: String(body.input ?? ""), meeting: !room });
+      const sessionKey = String(req.headers["x-hermes-session-key"] ?? "");
+      // 회의 세션 키는 `…-meeting-<channelId>`·`meeting-<meetingId>` 다(socket-handlers.ts·meeting-discussion.ts).
+      // 회의는 한 줄 발언(SPEAK:), 방·1:1 은 보통 답.
+      runs.set(id, { name, input: String(body.input ?? ""), meeting: /(^|-)meeting-/.test(sessionKey), sessionKey });
       if (runs.size > 500) runs.delete(runs.keys().next().value);
       return json(res, 202, { run_id: id });
     }
+    // 크론(프로필 범위) — 이 사무실의 예약은 Lark 브리핑 루틴이지 직원의 크론이 아니다. 읽기는 0건.
+    if (m === "GET" && path === "/deskrpg/cron/jobs") return json(res, 200, { jobs: [] });
+    if (m === "GET" && path === "/deskrpg/cron/delivery-targets") return json(res, 200, { targets: [] });
+    if (m === "GET" && path === "/deskrpg/cron/blueprints") return json(res, 200, { blueprints: [] });
+    if (m === "GET" && /^\/deskrpg\/cron\/jobs\/[^/]+/.test(path)) return json(res, 404, { error: "job_not_found" });
     const ev = /^\/v1\/runs\/([^/]+)\/events$/.exec(path);
     if (m === "GET" && ev) {
       const run = runs.get(decodeURIComponent(ev[1]));
       if (!run || run.name !== name) return json(res, 404, { error: "not_found" });
-      return sse(res, "message", composeReply(name, run.input, office, { meeting: run.meeting }));
+      return sse(res, "message", replyFor(name, run.input, office, { meeting: run.meeting, sessionKey: run.sessionKey }));
     }
     if (m !== "GET") return json(res, 403, READ_ONLY);
     return json(res, 404, { error: "not_found" });
@@ -257,20 +335,49 @@ function main() {
       port: { type: "string", default: "8642" },
       state: { type: "string" },
       "admin-port": { type: "string" },
+      "dashboard-port": { type: "string" },
+      "dashboard-host": { type: "string", default: "127.0.0.1" },
     },
+  });
+  const root = fileURLToPath(new URL("..", import.meta.url));
+  const identity = createIdentitySource({
+    configPath: join(root, "config", "office.config.json"),
+    seedStatePath: join(root, "out", "seed_state.json"),
   });
   const officePath = resolve(values.office);
   const statePath = values.state ? resolve(values.state) : join(dirname(officePath), "gateway-boards.json");
-  const server = createGateway({ officePath, token: process.env.FAMIGO_GATEWAY_TOKEN, statePath });
+  const server = createGateway({
+    officePath,
+    token: process.env.FAMIGO_GATEWAY_TOKEN,
+    statePath,
+    eventsPath: join(dirname(officePath), "gateway-events.json"),
+    personal: {
+      insightsPath: join(dirname(officePath), "insights.json"),
+      identity,
+      dashboardUrl: process.env.FAMIGO_DASHBOARD_URL || null,
+    },
+  });
   server.listen(Number(values.port), values.host, () => {
     console.log(`[famigo-gateway] http://${values.host}:${values.port} · office ${officePath}`);
   });
   if (values["admin-port"]) {
     // 관리자 웹은 설정을 바꾸는 창구라 LAN 설정과 무관하게 항상 이 Mac 에서만 연다.
-    const root = fileURLToPath(new URL("..", import.meta.url));
-    const admin = createAdmin({ root, password: process.env.FAMIGO_DESK_PASSWORD, runSync: shellSync(root) });
+    const admin = createAdmin({ root, runSync: shellSync(root) });
     admin.listen(Number(values["admin-port"]), "127.0.0.1", () => {
-      console.log(`[famigo-admin] http://127.0.0.1:${values["admin-port"]} (admin / FAMIGO_DESK_PASSWORD)`);
+      console.log(`[famigo-admin] http://127.0.0.1:${values["admin-port"]} (이 Mac 전용 · 로그인 없음)`);
+    });
+  }
+  if (values["dashboard-port"]) {
+    // 대시보드는 사무실 로그인(DeskRPG JWT 쿠키)으로 사람을 알아본다 — --lan 이면 팀원도 연다.
+    const briefsDir = resolve(process.env.FAMIGO_DATA_DIR || join(process.env.HOME ?? "", "famigo_campaign/briefs/data"), "..");
+    const dashboard = createDashboard({
+      root,
+      briefsDir,
+      jwtSecret: process.env.DESKRPG_JWT_SECRET,
+      deskPort: Number(process.env.FAMIGO_DESK_PORT) || 3300,
+    });
+    dashboard.listen(Number(values["dashboard-port"]), values["dashboard-host"], () => {
+      console.log(`[famigo-dashboard] http://${values["dashboard-host"]}:${values["dashboard-port"]}`);
     });
   }
 }

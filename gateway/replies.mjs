@@ -35,6 +35,21 @@ function memberReply(member, office) {
     member.reports !== null && member.reports !== undefined ? `일일보고 누적 ${member.reports}회` : null,
   ].filter(Boolean);
   if (activity.length) out.push(activity.join(" · "));
+  // 일일보고·지금 Lark — 사무실 보드에 이미 올라 팀이 보는 것만 말한다.
+  const work = (office.boards.work ?? []).filter((w) => w.assignee === member.key);
+  const now = work.find((w) => w.section === "presence");
+  if (now) out.push(`지금 Lark 에서 활동 중 — ${now.room ?? "방 미기록"}`);
+  const pick = (status) => work.filter((w) => w.status === status && w.section !== "presence").map((w) => `- ${w.title}`);
+  const doing = pick("running");
+  const blocked = pick("blocked");
+  const support = pick("review");
+  const report = work.find((w) => w.section !== "presence")?.report_date;
+  if (doing.length || blocked.length || support.length) {
+    out.push("", `**일일보고 ${report ?? ""} 기준 지금 하는 일**`);
+    if (doing.length) out.push(...doing.slice(0, 5));
+    if (blocked.length) out.push("", "**막힘**", ...blocked.slice(0, 3));
+    if (support.length) out.push("", "**지원 요청**", ...support.slice(0, 3));
+  }
   if (mine.length) {
     out.push("", `**Lark 장부에서 제 이름이 걸린 열린 항목 ${mine.length}건**`, "");
     out.push(...mine.slice(0, 5).map(line));

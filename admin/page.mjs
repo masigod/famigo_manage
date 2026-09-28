@@ -38,7 +38,7 @@ export function renderAdminPage() {
   .tabs button[aria-pressed="true"] { background: var(--ink); color: var(--panel); border-color: var(--ink); }
   input[type=search] { border: 1px solid var(--line); background: var(--bg); color: var(--ink); border-radius: 8px; padding: 6px 10px; font: inherit; min-width: 180px; }
   .rows { display: grid; }
-  .row { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(3, minmax(110px, 1fr)) minmax(170px, 1.3fr) auto;
+  .row { display: grid; grid-template-columns: minmax(150px, 1.2fr) repeat(3, minmax(100px, 1fr)) minmax(96px, .7fr) minmax(170px, 1.3fr) auto;
          gap: 10px; align-items: center; padding: 12px 16px; border-top: 1px solid var(--line); }
   .row:first-child { border-top: 0; }
   .row.off { opacity: .55; }
@@ -55,6 +55,7 @@ export function renderAdminPage() {
   button:focus-visible, input:focus-visible, select:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
   .empty { padding: 18px 16px; color: var(--muted); }
   .row.access { grid-template-columns: minmax(150px, 1fr) minmax(200px, 3fr) auto; }
+  .row.account { grid-template-columns: minmax(180px, 1.4fr) minmax(160px, 1fr) minmax(130px, .8fr) auto; }
   code { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; background: var(--bg); border: 1px solid var(--line);
          border-radius: 8px; padding: 6px 10px; overflow-wrap: anywhere; }
   details { padding: 12px 16px; }
@@ -84,6 +85,13 @@ export function renderAdminPage() {
       <p>팀원에게는 아래 세 가지만 알려 주세요. 소유자·관리자 비밀번호는 알려 주지 않습니다.</p>
     </div>
     <div class="rows" id="access"></div>
+  </section>
+  <section aria-labelledby="h-accounts">
+    <div class="sec-head">
+      <h2 id="h-accounts">대시보드 계정 연결</h2>
+      <p id="accounts-note">사무실에 가입한 계정을 Lark 사람과 잇습니다. 연결된 계정만 대시보드와 1:1 대화에서 자기 일을 봅니다. 관리자는 전부를 봅니다. 닉네임만으로는 아무 권한도 생기지 않습니다.</p>
+    </div>
+    <div class="rows" id="accounts"></div>
   </section>
   <section aria-labelledby="h-members">
     <div class="sec-head">
@@ -158,9 +166,16 @@ export function renderAdminPage() {
       + " · 사무실 데이터 " + (state.office_generated_at ? new Date(state.office_generated_at).toLocaleString("ko-KR") : "없음");
   }
 
-  function lookSelect(value, disabled) {
+  function bodySelect(value, disabled) {
+    const s = el("select", { "aria-label": "몸형", disabled, title: "대화에는 성별 근거가 없어 사람이 정합니다" });
+    for (const [v, t] of [["", "몸형 유지"], ["female", "여성형"], ["male", "남성형"]]) s.append(el("option", { value: v, text: t, selected: v === value }));
+    return s;
+  }
+
+  function lookSelect(value, disabled, persona) {
     const s = el("select", { "aria-label": "외형", disabled });
-    s.append(el("option", { value: "", text: "자동 배정" }));
+    const auto = persona && persona.look ? state.looks.find((l) => l.id === persona.look) : null;
+    s.append(el("option", { value: "", text: auto ? "자동 — " + auto.name + " (말투 분석)" : "자동 배정" }));
     for (const l of state.looks) s.append(el("option", { value: l.id, text: l.name + " — " + l.subtitle, selected: l.id === value }));
     return s;
   }
@@ -171,12 +186,15 @@ export function renderAdminPage() {
     const dn = input(m.display_name, m.name, "표시 이름");
     const role = input(m.role, "직무", "직무");
     const team = input(m.team, "팀", "팀");
-    const look = lookSelect(m.look, off);
+    const body = bodySelect(m.body, off);
+    const look = lookSelect(m.look, off, m.persona);
+    const kinds = { leadership: "리더십", creative: "크리에이티브", casual: "캐주얼", classic: "클래식" };
     const sub = [m.rooms + "개 방", m.last_active ? "최근 발화 " + m.last_active : "최근 발화 기록 없음",
-                 m.reports !== null ? "일일보고 " + m.reports + "회" : null].filter(Boolean).join(" · ");
+                 m.reports !== null ? "일일보고 " + m.reports + "회" : null,
+                 m.persona ? "말투 분석: " + (kinds[m.persona.category] || m.persona.category) : null].filter(Boolean).join(" · ");
     const save = el("button", { class: "act primary", text: "저장", disabled: off, onclick: async () => {
       save.disabled = true;
-      try { await post("/api/member", { name: m.name, action: "update", display_name: dn.value, role: role.value, team: team.value, look: look.value }); toast(m.name + " 저장 — 사무실에 반영 중"); await load(); }
+      try { await post("/api/member", { name: m.name, action: "update", display_name: dn.value, role: role.value, team: team.value, body: body.value, look: look.value }); toast(m.name + " 저장 — 사무실에 반영 중"); await load(); }
       catch (e) { toast("저장 실패: " + e.message); save.disabled = false; }
     }});
     const toggle = el("button", { class: "act " + (off ? "" : "danger"), text: off ? "복귀" : "퇴장", onclick: async () => {
@@ -186,8 +204,8 @@ export function renderAdminPage() {
       catch (e) { toast("실패: " + e.message); toggle.disabled = false; }
     }});
     return el("div", { class: "row" + (off ? " off" : "") },
-      el("div", { class: "who" }, el("b", { text: m.name }), el("span", { text: off ? "퇴장 · " + sub : sub })),
-      dn, role, team, look, el("div", { class: "actions" }, save, toggle));
+      el("div", { class: "who", title: m.persona ? m.persona.evidence + "\\n몸형: " + m.persona.body_source : "" }, el("b", { text: m.name }), el("span", { text: off ? "퇴장 · " + sub : sub })),
+      dn, role, team, body, look, el("div", { class: "actions" }, save, toggle));
   }
 
   function copyRow(label, value, note) {
@@ -213,9 +231,62 @@ export function renderAdminPage() {
     );
   }
 
+  function accountRow(u) {
+    const a = state.accounts;
+    const linked = a.linked[u.id];
+    const sub = (u.loginId || "") + (u.createdAt ? " · 가입 " + String(u.createdAt).slice(0, 10) : "");
+    if (u.id === a.owner_user_id && !linked) {
+      return el("div", { class: "row account" },
+        el("div", { class: "who" }, el("b", { text: u.nickname }), el("span", { text: sub })),
+        el("div", { text: a.owner_person || "Dylan" }), el("div", { text: "관리자" }),
+        el("div", { class: "actions" }, el("span", { class: "meta", text: "사무실 소유자 — 자동" })));
+    }
+    const person = el("select", { "aria-label": "Lark 사람" });
+    person.append(el("option", { value: "", text: "— 연결 안 함 —" }));
+    for (const n of a.persons) person.append(el("option", { value: n, text: n, selected: linked && linked.person === n }));
+    const role = el("select", { "aria-label": "역할" });
+    for (const [v, t] of [["member", "팀원 — 자기 것 + 팀 현황"], ["admin", "관리자 — 전부"]]) role.append(el("option", { value: v, text: t, selected: linked ? linked.role === v : v === "member" }));
+    const save = el("button", { class: "act primary", text: "저장", onclick: async () => {
+      save.disabled = true;
+      try {
+        if (!person.value) await post("/api/account", { action: "unlink_account", userId: u.id });
+        else {
+          if (role.value === "admin" && !confirm(u.nickname + " 계정에 관리자(모든 원문·분석·L2·L3 열람) 권한을 줄까요?")) { save.disabled = false; return; }
+          await post("/api/account", { action: "link_account", userId: u.id, person: person.value, role: role.value });
+        }
+        toast(u.nickname + " 연결 저장 — 바로 적용"); await load();
+      } catch (e) { toast("저장 실패: " + e.message); save.disabled = false; }
+    }});
+    return el("div", { class: "row account" + (linked ? "" : " off") },
+      el("div", { class: "who" }, el("b", { text: u.nickname }), el("span", { text: sub + (linked ? "" : " · 연결 안 됨") })),
+      person, role, el("div", { class: "actions" }, save));
+  }
+
+  function signupRow(a) {
+    const closed = a.signup === "closed";
+    const b = el("button", { class: "act " + (closed ? "primary" : "danger"), text: closed ? "가입 열기" : "가입 닫기", onclick: async () => {
+      b.disabled = true;
+      try { await post("/api/account", { action: "signup", value: closed ? "open" : "closed" }); toast(closed ? "가입을 열었습니다" : "가입을 닫았습니다 — 로그인은 그대로"); await load(); }
+      catch (e) { toast("실패: " + e.message); b.disabled = false; }
+    }});
+    return el("div", { class: "row access" },
+      el("div", { class: "who" }, el("b", { text: "새 계정 가입" }), el("span", { text: closed ? "닫힘 — 새 계정을 만들 수 없습니다" : "열림 — 같은 네트워크의 누구나 계정을 만들 수 있습니다" })),
+      el("span", { class: "meta", text: "팀원이 모두 가입했으면 닫으세요. 사무실 안은 채널 비밀번호로 한 번 더 막혀 있습니다." }),
+      el("div", { class: "actions" }, b));
+  }
+
+  function renderAccounts() {
+    const a = state.accounts;
+    const box = $("accounts");
+    if (a.dashboard_url) $("accounts-note").textContent = "대시보드: " + a.dashboard_url + " — 사무실 로그인 그대로 열립니다. 연결된 계정만 자기 일을 보고, 관리자는 전부를 봅니다. 닉네임만으로는 아무 권한도 생기지 않습니다.";
+    if (a.error) { box.replaceChildren(el("div", { class: "empty", text: a.error })); return; }
+    box.replaceChildren(signupRow(a), ...(a.users.length ? a.users.map(accountRow) : [el("div", { class: "empty", text: "사무실에 가입한 계정이 없습니다." })]));
+  }
+
   function render() {
     renderSync();
     renderAccess();
+    renderAccounts();
     const q = $("q").value.trim().toLowerCase();
     const list = state.members
       .filter((m) => filter === "all" || (filter === "on" ? !m.excluded : m.excluded))
@@ -231,7 +302,7 @@ export function renderAdminPage() {
         catch (e) { toast("실패: " + e.message); b.disabled = false; }
       }});
       return el("div", { class: "row" }, el("div", { class: "who" }, el("b", { text: d.display_name }), el("span", { text: "Lark 명단에 없음" })),
-        el("div"), el("div"), el("div"), el("div"), el("div", { class: "actions" }, b));
+        el("div"), el("div"), el("div"), el("div"), el("div"), el("div", { class: "actions" }, b));
     }) : [el("div", { class: "empty", text: "없음 — 사무실 직원이 모두 Lark 명단에 있습니다." })]));
   }
 
